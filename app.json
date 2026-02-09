@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "SecondSelf",
+    "slug": "secondself",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      },
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.anonymous.secondself",
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "OXY Real - Anima",
+      "description": "Chat con Anima, Memory Vault e Power Badges"
+    },
+    "plugins": [
+      "expo-speech-recognition",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "OXY Real ha bisogno della fotocamera per scattare foto e analizzarle con Vision AI.",
+          "photosPermission": "OXY Real ha bisogno dell'accesso alle foto per analizzarle con Vision AI."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "OXY Real ha bisogno del microfono per registrare messaggi vocali."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "612d5c63-62b3-4890-a6da-66703911c722"
+      }
+    }
+  }
+}

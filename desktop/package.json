@@ -1,0 +1,15 @@
+{
+  "name": "oxy-real-desktop",
+  "version": "1.0.0",
+  "description": "OXY Real - Anima in versione desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --dev"
+  },
+  "author": "OXY Real",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}

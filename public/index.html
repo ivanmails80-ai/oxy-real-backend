@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <style id="expo-reset">
+      html, body { height: 100%; }
+      body { overflow: hidden; }
+      #root { display: flex; height: 100%; flex: 1; }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <div id="web-error" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#ff6b6b;padding:24px;font-family:monospace;font-size:14px;overflow:auto;z-index:99999;white-space:pre-wrap;"></div>
+    <script>
+      window.addEventListener('error', function(e) {
+        var el = document.getElementById('web-error');
+        if (el) {
+          el.textContent = (e.message || e) + (e.error && e.error.stack ? '\n\n' + e.error.stack : '');
+          el.style.display = 'block';
+        }
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var el = document.getElementById('web-error');
+        if (el) {
+          el.textContent = 'Promise rejection: ' + (e.reason && (e.reason.message || String(e.reason))) + (e.reason && e.reason.stack ? '\n\n' + e.reason.stack : '');
+          el.style.display = 'block';
+        }
+      });
+    </script>
+  </body>
+</html>

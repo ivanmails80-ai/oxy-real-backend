@@ -1,0 +1,20 @@
+# Ambiente e segreti (non committare mai)
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Firebase Android (contiene project id; opzionale ignorare se repo privato)
+android/app/google-services.json
+
+# Dipendenze e build
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# OS
+.DS_Store
+*.log
