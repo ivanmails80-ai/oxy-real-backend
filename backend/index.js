@@ -20,7 +20,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
-import fsSync from 'fs';
+import * as fsSync from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Storage locale (P0: su Render senza Persistent Disk è effimero).
