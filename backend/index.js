@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import Parser from 'rss-parser';
 import ffmpegStatic from 'ffmpeg-static';
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 import * as fsSync from 'fs';
@@ -826,8 +826,13 @@ app.post('/api/docs/extract', generalLimiter, async (req, res) => {
 
     let text = '';
     if (mt === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) {
-      const out = await pdfParse(buf);
-      text = String(out?.text || '');
+      const parser = new PDFParse({ data: buf });
+      try {
+        const out = await parser.getText();
+        text = String(out?.text || '');
+      } finally {
+        try { await parser.destroy?.(); } catch (_) {}
+      }
     } else if (
       mt === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       name.toLowerCase().endsWith('.docx')
