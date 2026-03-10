@@ -40,14 +40,28 @@ if (!DATA_ROOT) {
 }
 if (!DATA_ROOT) DATA_ROOT = path.join(__dirname, 'data');
 
-console.log('[Storage] ENV DATA_ROOT =', ENV_DATA_ROOT || '(empty)', '→ using DATA_ROOT =', DATA_ROOT);
 const DATA_DIR = path.join(DATA_ROOT, 'chats');
 const MEMORIES_DIR = path.join(DATA_ROOT, 'memories');
 const DIARY_DIR = path.join(DATA_ROOT, 'diary');
 const STORY_STATE_DIR = path.join(DATA_ROOT, 'storyState');
 const BILLING_DIR = path.join(DATA_ROOT, 'billing');
 const USAGE_DIR = path.join(DATA_ROOT, 'usage');
+const CREDITS_DIR = path.join(DATA_ROOT, 'credits');
 const OXY_TV_DIR = path.join(DATA_ROOT, 'oxy-tv');
+const USERS_DIR = path.join(DATA_ROOT, 'users');
+
+// Conoscenza app per l'assistente IA (solo server: non esposta in app)
+const KNOWLEDGE_PATH = path.join(__dirname, 'knowledge', 'oxy_app_knowledge.md');
+let OXY_KNOWLEDGE_CONTENT = '';
+
+async function loadOxyKnowledge() {
+  try {
+    const raw = await fs.readFile(KNOWLEDGE_PATH, 'utf8');
+    OXY_KNOWLEDGE_CONTENT = (raw && typeof raw === 'string') ? raw.trim() : '';
+  } catch (_) {
+    // File assente o non leggibile: Oxy risponde senza blocco conoscenza
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -79,7 +93,7 @@ const rssParser = new Parser();
 const chatLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minuti
   max: 100, // 100 richieste per IP/utente ogni 15 minuti
-  message: { error: 'Troppe richieste. Attendi qualche minuto e riprova.' },
+  message: { error: 'Forse Oxy si è addormentata. Scrivile solo «Oxy», così si sveglia.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -109,9 +123,92 @@ const generalLimiter = rateLimit({
 });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
+/** Modelli per tier: Free/Starter = mini, Pro = 4o, Elite = 4-turbo (o 4o). Fallback per Master/token pack. */
+const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
+const OPENAI_MODEL_PRO = (process.env.OPENAI_MODEL_PRO || 'gpt-4o').trim() || 'gpt-4o';
+const OPENAI_MODEL_ELITE = (process.env.OPENAI_MODEL_ELITE || 'gpt-4-turbo').trim() || 'gpt-4-turbo';
+const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || OPENAI_MODEL_STARTER).trim() || OPENAI_MODEL_STARTER;
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
 const MASTER_EMAIL = process.env.MASTER_EMAIL?.trim()?.toLowerCase();
+const BREVO_API_KEY = process.env.BREVO_API_KEY?.trim();
 const PORT = process.env.PORT || 3030;
+
+/** Chiave Gemini valida (es. inizia con AIza, lunga): l'utente la porta, costo zero per noi. */
+function isValidGeminiKey(key) {
+  return key && typeof key === 'string' && key.trim().length >= 30;
+}
+
+/**
+ * Chiama Gemini (Google AI) con messaggi in formato OpenAI-like.
+ * Restituisce { text } o lancia in caso di errore.
+ * Nessun tool (web search / memory): solo conversazione. Con Gemini l'utente usa il free tier Google.
+ */
+async function callGeminiChat(messages, geminiApiKey, imageBase64 = null) {
+  const key = geminiApiKey.trim();
+  const model = 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+
+  let systemInstruction = '';
+  const contents = [];
+
+  const lastUserIdx = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i >= 0).pop();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const role = m.role;
+    const content = m.content;
+    if (role === 'system') {
+      systemInstruction = (typeof content === 'string' ? content : (Array.isArray(content) ? content.map(p => p.type === 'text' ? p.text : '').join('\n') : '')).trim();
+      continue;
+    }
+    const text = typeof content === 'string' ? content : (Array.isArray(content) ? content.filter(p => p.type === 'text').map(p => p.text).join('\n') : '');
+    const isLastUser = role === 'user' && i === lastUserIdx;
+    if (!text && !(imageBase64 && isLastUser) && role !== 'user') continue;
+    const parts = [];
+    if (text) parts.push({ text });
+    if (imageBase64 && isLastUser) {
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageBase64.replace(/^data:image\/\w+;base64,/, ''),
+        },
+      });
+    }
+    if (parts.length === 0 && role !== 'user') continue;
+    if (parts.length === 0 && role === 'user') parts.push({ text: '(immagine)' });
+    const geminiRole = role === 'assistant' ? 'model' : 'user';
+    contents.push({ role: geminiRole, parts });
+  }
+
+  const body = {
+    contents,
+    generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+  };
+  if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction }] };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 429) throw new Error('RATE_LIMIT_GEMINI');
+    throw new Error(errText || `Gemini ${res.status}`);
+  }
+
+  const data = await res.json();
+  const candidate = data?.candidates?.[0];
+  if (!candidate?.content?.parts?.length) {
+    const blockReason = candidate?.finishReason || data?.promptFeedback?.blockReason;
+    if (blockReason) throw new Error('Risposta non disponibile (contenuto filtrato).');
+    throw new Error('Risposta Gemini vuota.');
+  }
+  const textPart = candidate.content.parts.find(p => p.text);
+  const text = textPart?.text?.trim() || '';
+  if (!text) throw new Error('Risposta Gemini vuota.');
+  return { text };
+}
 
 // SMTP (invio email automatico documenti) — opzionale
 const SMTP_HOST = process.env.SMTP_HOST?.trim();
@@ -135,6 +232,23 @@ function getMailer() {
   return mailerTransport;
 }
 
+// Email benvenuto dopo pagamento: usa getMailer se doc-email attivo, altrimenti transport solo se WELCOME_EMAIL_AFTER_PAYMENT
+const WELCOME_EMAIL_AFTER_PAYMENT = String(process.env.WELCOME_EMAIL_AFTER_PAYMENT || '').trim() === 'true';
+function getMailerForWelcome() {
+  const fromDocs = getMailer();
+  if (fromDocs) return fromDocs;
+  if (!WELCOME_EMAIL_AFTER_PAYMENT) return null;
+  if (!SMTP_HOST || !SMTP_FROM || !SMTP_USER || !SMTP_PASS) return null;
+  if (mailerTransport) return mailerTransport;
+  mailerTransport = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+  return mailerTransport;
+}
+
 // Stripe (checkout abbonamenti/Lifetime) — opzionale, attivo solo se configurato
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY?.trim();
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -142,12 +256,45 @@ const STRIPE_PRICE_MAP = {
   sub_starter: process.env.STRIPE_PRICE_SUB_STARTER?.trim(),
   sub_pro: process.env.STRIPE_PRICE_SUB_PRO?.trim(),
   sub_elite: process.env.STRIPE_PRICE_SUB_ELITE?.trim(),
+  sub_starter_annual: process.env.STRIPE_PRICE_SUB_STARTER_ANNUAL?.trim(),
+  sub_pro_annual: process.env.STRIPE_PRICE_SUB_PRO_ANNUAL?.trim(),
+  sub_elite_annual: process.env.STRIPE_PRICE_SUB_ELITE_ANNUAL?.trim(),
   life_starter: process.env.STRIPE_PRICE_LIFE_STARTER?.trim(),
   life_pro: process.env.STRIPE_PRICE_LIFE_PRO?.trim(),
   life_elite: process.env.STRIPE_PRICE_LIFE_ELITE?.trim(),
+  pack_100k: process.env.STRIPE_PRICE_PACK_100K?.trim(),
+  pack_500k: process.env.STRIPE_PRICE_PACK_500K?.trim(),
 };
+// Token inclusi per ogni pacchetto (per webhook)
+const TOKEN_PACK_AMOUNTS = { pack_100k: 100000, pack_500k: 500000 };
 const STRIPE_SUCCESS_URL = process.env.STRIPE_SUCCESS_URL?.trim();
 const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL?.trim();
+
+// Nomi piani per email di benvenuto (allineati a pricingConfig lato app)
+const PLAN_DISPLAY_NAMES = {
+  sub_starter: 'OXY Pass Starter',
+  sub_starter_annual: 'OXY Pass Starter',
+  sub_pro: 'OXY Pass Pro',
+  sub_pro_annual: 'OXY Pass Pro',
+  sub_elite: 'OXY Pass Elite',
+  sub_elite_annual: 'OXY Pass Elite',
+  life_starter: 'OXY Lifetime Starter',
+  life_pro: 'OXY Lifetime Pro',
+  life_elite: 'OXY Lifetime Elite',
+};
+function getWelcomeEmailBody(planId, mode) {
+  const planName = PLAN_DISPLAY_NAMES[planId] || planId;
+  const planType = mode === 'subscription' ? 'subscription' : 'one-time purchase';
+  return `Welcome to OXY Real.
+
+You've activated ${planName} (${planType}).
+
+What your plan includes: Memory Vault, Stories, Diary, and more depending on your tier. You can see the details in the app under Menu → Subscription.
+
+For any question about how the app works — features, memory, diary, stories, voice — you can ask Oxy directly in chat. Oxy is there for that.
+
+— The OXY Real team`;
+}
 
 // Trial/Beta access (per go-live senza monetizzazione immediata)
 // - Se attivo, il backend può assegnare automaticamente uno stato "trialing" al primo /api/billing/status
@@ -156,13 +303,45 @@ const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL?.trim();
 const BILLING_TRIAL_ENABLED = String(process.env.BILLING_TRIAL_ENABLED || '').trim() === 'true';
 const BILLING_TRIAL_DAYS = Math.max(1, Math.min(30, Number(process.env.BILLING_TRIAL_DAYS || 2)));
 const BILLING_TRIAL_PLAN_ID = (process.env.BILLING_TRIAL_PLAN_ID || 'sub_starter').trim();
-const BILLING_TRIAL_DAILY_LIMIT = Math.max(1, Math.min(400, Number(process.env.BILLING_TRIAL_DAILY_LIMIT || 25)));
+// Limiti per test veloce: se BILLING_QUICK_TEST_LIMITS=N (es. 5), trial e tutti i piani usano N messaggi/giorno.
+const _quickTest = process.env.BILLING_QUICK_TEST_LIMITS != null && process.env.BILLING_QUICK_TEST_LIMITS !== ''
+  ? Math.max(1, Math.min(100, Number(process.env.BILLING_QUICK_TEST_LIMITS)))
+  : null;
+const BILLING_TRIAL_DAILY_LIMIT = _quickTest != null
+  ? _quickTest
+  : Math.max(1, Math.min(400, Number(process.env.BILLING_TRIAL_DAILY_LIMIT || 25)));
 
+// Limiti giornalieri per piano: da env (modificabili senza toccare codice), fallback valori di default
+const _dailyLimitStarter = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_STARTER || 50)));
+const _dailyLimitPro = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_PRO || 150)));
+const _dailyLimitElite = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_ELITE || 400)));
+const FREE_DAILY_LIMIT = Math.max(1, Math.min(50, Number(process.env.FREE_DAILY_LIMIT || 5)));
 const DAILY_LIMITS_BY_PLAN = {
-  sub_starter: 50,
-  sub_pro: 150,
-  sub_elite: 400,
+  sub_starter: _dailyLimitStarter,
+  sub_pro: _dailyLimitPro,
+  sub_elite: _dailyLimitElite,
+  free: FREE_DAILY_LIMIT,
 };
+
+/** Normalizza planId per lookup limiti: sub_x_annual → sub_x (stesso limite del mensile). */
+function normalizePlanIdForLimits(planId) {
+  if (!planId || typeof planId !== 'string') return planId;
+  const p = planId.trim();
+  if (p === 'sub_starter_annual') return 'sub_starter';
+  if (p === 'sub_pro_annual') return 'sub_pro';
+  if (p === 'sub_elite_annual') return 'sub_elite';
+  return p;
+}
+
+/** Restituisce il modello OpenAI da usare per la chat in base al piano: Free/Starter → mini, Pro → 4o, Elite → 4-turbo. */
+function getChatModelForPlan(planId, isFree, useTokenPack) {
+  if (useTokenPack) return OPENAI_MODEL_STARTER;
+  if (isFree || !planId) return OPENAI_MODEL_STARTER;
+  const p = String(planId).trim();
+  if (p.startsWith('sub_elite') || p === 'life_elite') return OPENAI_MODEL_ELITE;
+  if (p.startsWith('sub_pro') || p === 'life_pro') return OPENAI_MODEL_PRO;
+  return OPENAI_MODEL_STARTER; // sub_starter, life_starter, sub_starter_annual, ecc.
+}
 
 function dateISO() {
   return new Date().toISOString().slice(0, 10);
@@ -196,23 +375,78 @@ function usagePath(uid, dayIso) {
   return path.join(USAGE_DIR, `chat_${safeDay}_${safe}.json`);
 }
 
-async function readChatUsage(uid, dayIso) {
-  if (!uid) return 0;
+async function getUsage(uid, dayIso) {
+  if (!uid) return { count: 0, tokens: 0 };
   try {
     const raw = await fs.readFile(usagePath(uid, dayIso), 'utf8');
     const data = JSON.parse(raw);
-    return typeof data?.count === 'number' ? data.count : 0;
+    return {
+      count: typeof data?.count === 'number' ? data.count : 0,
+      tokens: typeof data?.tokens === 'number' ? data.tokens : 0,
+    };
+  } catch {
+    return { count: 0, tokens: 0 };
+  }
+}
+
+async function readChatUsage(uid, dayIso) {
+  const u = await getUsage(uid, dayIso);
+  return u.count;
+}
+
+async function readTokenUsage(uid, dayIso) {
+  const u = await getUsage(uid, dayIso);
+  return u.tokens;
+}
+
+async function incUsage(uid, dayIso, countDelta = 0, tokensDelta = 0) {
+  if (!uid || (countDelta === 0 && tokensDelta === 0)) return;
+  await ensureUsageDir();
+  const u = await getUsage(uid, dayIso);
+  const count = Math.max(0, u.count + (Number(countDelta) || 0));
+  const tokens = Math.max(0, u.tokens + (Number(tokensDelta) || 0));
+  await fs.writeFile(usagePath(uid, dayIso), JSON.stringify({ uid, day: dayIso, count, tokens }, null, 0), 'utf8');
+}
+
+async function incChatUsage(uid, dayIso, delta = 1) {
+  await incUsage(uid, dayIso, delta, 0);
+}
+
+// ——— Credito token (pacchetti acquistati)
+async function ensureCreditsDir() {
+  await fs.mkdir(CREDITS_DIR, { recursive: true });
+}
+
+function creditsPath(uid) {
+  const safe = (uid || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(CREDITS_DIR, `${safe}.json`);
+}
+
+async function readTokenBalance(uid) {
+  if (!uid) return 0;
+  try {
+    const raw = await fs.readFile(creditsPath(uid), 'utf8');
+    const data = JSON.parse(raw);
+    return typeof data?.balance === 'number' && data.balance >= 0 ? data.balance : 0;
   } catch {
     return 0;
   }
 }
 
-async function incChatUsage(uid, dayIso, delta = 1) {
-  if (!uid) return;
-  await ensureUsageDir();
-  const prev = await readChatUsage(uid, dayIso);
-  const next = Math.max(0, prev + (Number(delta) || 0));
-  await fs.writeFile(usagePath(uid, dayIso), JSON.stringify({ uid, day: dayIso, count: next }, null, 0), 'utf8');
+async function addTokenBalance(uid, amount) {
+  if (!uid || amount <= 0) return;
+  await ensureCreditsDir();
+  const prev = await readTokenBalance(uid);
+  const next = prev + (Number(amount) || 0);
+  await fs.writeFile(creditsPath(uid), JSON.stringify({ uid, balance: Math.max(0, next), updatedAt: new Date().toISOString() }, null, 0), 'utf8');
+}
+
+async function deductTokenBalance(uid, amount) {
+  if (!uid || amount <= 0) return;
+  await ensureCreditsDir();
+  const prev = await readTokenBalance(uid);
+  const next = Math.max(0, prev - (Number(amount) || 0));
+  await fs.writeFile(creditsPath(uid), JSON.stringify({ uid, balance: next, updatedAt: new Date().toISOString() }, null, 0), 'utf8');
 }
 
 // Firebase Admin (verifica idToken) — GOOGLE_APPLICATION_CREDENTIALS letto da .env
@@ -450,7 +684,7 @@ const SAVE_MEMORY_TOOL = {
   type: 'function',
   function: {
     name: 'save_memory',
-    description: 'Salva nella Memory Vault dell\'utente: identità, obiettivi, fatti importanti, promemoria, cose da fare, acquisti da ricordare (es. "comprare le uova"). Quando l\'utente dice "ricordami X", "memorizza Y", "salva che Z" DEVI chiamare save_memory e confermare che è stato salvato. Non dire mai che non puoi memorizzare.',
+    description: 'Salva nella Memory Vault dell\'utente: identità, obiettivi, fatti importanti, promemoria, cose da fare. OBBLIGATORIO: se l\'utente dice "ricordami X", "ricordami di Y alle HH:MM", "memorizza Y", "salva che Z", "promemoria per..." DEVI chiamare save_memory (stesso turno, non solo rispondere a parole). Per promemoria con orario usa keyFacts con testo tipo "Compito — HH:MM" (es. "Inviare SMS — 16:35"). Senza questa chiamata il promemoria NON compare in Memory Vault.',
     parameters: {
       type: 'object',
       properties: {
@@ -492,8 +726,62 @@ const VOICE_PERSONALITY_PROMPTS = {
   cedar: 'Tono da Collaboratore: cordiale, umile, pacato. Un supporto costante senza pretese. Risposte misurate e collaborative, mai invadenti.',
 };
 
-function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO, language, moduleName, memoryBlock, hasImage }) {
-  const mem = memoryBlock ? `\n\nMEMORIA A LUNGO TERMINE (usa sempre, non chiedere di nuovo):\n${memoryBlock}\n` : '';
+/** Blocco sistema per onboarding: Performance Coach, domande su ambizione / problemi / visione. it/en dedicati; fr, es, ar, zh: blocco EN + rispondi nella lingua indicata in Lingua:. */
+function getOnboardingSystemBlock(language) {
+  const raw = (language || 'it').toLowerCase().trim();
+  const lang = raw.startsWith('en') ? 'en' : (raw.startsWith('it') ? 'it' : 'other');
+  if (lang === 'en') {
+    return `
+——— FIRST MESSAGE ONLY (ONBOARDING) ———
+You are a high-level Performance Coach, not a servile assistant. Your first message must create a "wow" moment: one powerful question that pushes the user to reveal real goals, vision, or passions. Tone: Alpha, professional, motivating. Use language that evokes Legacy, Vision, Breakthrough, Focus. Do NOT ask "How can I help?" or list multiple questions. Send ONE message with ONE question that makes them think.
+
+Choose or adapt ONE of these directions (do not list them; turn one into your single opening question):
+• Ambition: What they want to build or achieve (legacy, next level).
+• Current challenges: What’s holding them back or costing them energy.
+• Future vision: Where they see themselves in 1–3 years if they break through.
+
+In your first message, briefly and naturally mention that here you remember goals and reminders and they won't have to repeat things—that's the OXY difference. Then give your one powerful question.
+Goal: After 2–3 exchanges, the user should feel OXY is already indispensable.
+`;
+  }
+  if (lang === 'it') {
+    return `
+——— SOLO PRIMO MESSAGGIO (ONBOARDING) ———
+Sei un Performance Coach di alto livello, non un assistente servile. Il tuo primo messaggio deve creare un effetto "wow": una sola domanda potente che spinga l'utente a rivelare obiettivi reali, visione o passioni. Tono: diretto, sincero, ambizioso. Niente "Come posso aiutarti?", niente liste di domande. Invia UN solo messaggio con UNA domanda che li faccia pensare.
+
+Scegli o adatta UNA di queste direzioni (non elencarle; trasformane una nella tua unica domanda di apertura):
+• Ambizione: cosa vogliono costruire o raggiungere (obiettivi veri, prossimo livello).
+• Problemi attuali: cosa li blocca o costa loro energia ora.
+• Visione futura: dove si vedono tra 1–3 anni se superano lo scoglio.
+
+Nel primo messaggio accogli l'utente e, in una frase breve e naturale, fai capire che qui puoi ricordare obiettivi e promemoria e che non dovrà ripetere le cose: è la differenza OXY. Poi passa alla tua unica domanda potente.
+Obiettivo: dopo 2–3 scambi, l'utente deve sentire che OXY è già indispensabile.
+`;
+  }
+  // fr, es, ar, zh: blocco coach in inglese + rispondi nella lingua indicata in Lingua:
+  return `
+——— FIRST MESSAGE ONLY (ONBOARDING) ———
+You are a high-level Performance Coach, not a servile assistant. Your first message must create a "wow" moment: one powerful question that pushes the user to reveal real goals, vision, or passions. Tone: Alpha, professional, motivating. Do NOT ask "How can I help?" or list multiple questions. Send ONE message with ONE question that makes them think.
+
+Choose or adapt ONE of these directions (do not list them; turn one into your single opening question):
+• Ambition: What they want to build or achieve (legacy, next level).
+• Current challenges: What's holding them back or costing them energy.
+• Future vision: Where they see themselves in 1–3 years if they break through.
+
+In your first message, briefly mention that here you remember goals and reminders and they won't have to repeat things—that's the OXY difference. Then give your one powerful question.
+IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system prompt (e.g. French, Spanish, Arabic, Chinese). Do not use Italian or English unless that is the indicated language.
+`;
+}
+
+function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
+  const hasMem = !!(memoryBlock && memoryBlock.trim());
+  const hasDiary = !!(diaryBlock && diaryBlock.trim());
+  const mem = hasMem
+    ? `\n\n——— MEMORIA (Memory Vault / Le mie note) ———\n${memoryBlock}\nQuando l'utente chiede "cosa hai memorizzato", "cosa c'è nelle mie note", "leggi la memoria", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
+    : '\n\n——— MEMORIA ———\nAl momento nessuna voce in Memory Vault. Se l\'utente chiede cosa c\'è nelle note, dillo con naturalezza.\n';
+  const diary = hasDiary
+    ? `\n\n——— DIARIO DELL'UTENTE ———\n${diaryBlock}\nQuando l'utente chiede "cosa ho scritto nel diario", "leggi il diario", "cosa c'è nel diario", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
+    : '\n\n——— DIARIO ———\nAl momento nessuna voce nel diario. Se l\'utente chiede cosa ha scritto, dillo con naturalezza.\n';
   const imageBlock = hasImage
     ? '\n• IMMAGINI: Se l\'utente invia un\'immagine, descrivi in modo strutturato (oggetti, contesto, atmosfera o emozioni evocate). Se è un momento significativo (luogo, cibo, documento, persona), puoi suggerire di salvarlo in memoria con save_memory (keyFacts) come "momento visivo" e proporre all\'utente di ricordarlo.\n'
     : '';
@@ -503,7 +791,8 @@ function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO
   const personalityLine = (voiceId && VOICE_PERSONALITY_PROMPTS[voiceId])
     ? VOICE_PERSONALITY_PROMPTS[voiceId]
     : 'Personalità: amichevole, coerente, orientata alla chiarezza e ai passi concreti.';
-  return `Sei ${customAiName || 'OXY'} (OXY). Modello: gpt-4o.
+  const onboardingBlock = initialOnboarding ? getOnboardingSystemBlock(language) : '';
+  return `Sei ${customAiName || 'OXY'} (OXY). Modello: ${chatModel ?? OPENAI_CHAT_MODEL}.
 ${personalityLine}
 ${nameLine}
 
@@ -513,11 +802,13 @@ ${nameLine}
 • SINCERA MA MORBIDA: Sii sincera e diretta, ma con tatto. Niente "Certamente", niente "Sono qui per aiutarti" da assistente. Parla come parlerebbe un amico vero.
 • NIENTE CHIUSURE DA ASSISTENTE: Non terminare mai i messaggi con frasi tipo "Se vuoi discutere ulteriori dettagli fammi sapere", "Se hai bisogno di suggerimenti specifici chiedi pure", "Fammi sapere se serve altro". Siete amici: lui/lei chiede a te e tu chiedi a lui/lei; non servono inviti servili a continuare. Finisci in modo naturale, come in una chat tra amici.
 • IDENTITÀ DELL'UTENTE: Basati su chi hai davanti (usa la memoria). Parla di LUI/LEI, non di te.
-• MEMORIA: Usa save_memory per salvare ciò che l'utente ti chiede di ricordare; usa clear_memory quando chiede di cancellare obiettivi, promemoria o parti della memoria (es. "cancella gli obiettivi", "dimentica quel promemoria", "svuota cosa ricordi di me"). Conferma sempre l'azione. Coerenza nel tempo.
+• MEMORIA: Quando l\'utente chiede di ricordare qualcosa ("ricordami di X", "ricordami alle 16:35", "promemoria per...") DEVI chiamare save_memory con keyFacts nello stesso turno (es. "Inviare SMS — 16:35"). Non basta rispondere "te lo ricordo": senza la chiamata non appare in Memory Vault. Usa clear_memory per cancellare obiettivi/promemoria. Conferma l\'azione dopo aver chiamato il tool.
 ${imageBlock}
 ${mem}
+${diary}
 DATA E ORA: ${nowStr}. Data ISO: ${dateISO}.
 
+• LINGUA: Rispondi sempre e solo nella lingua indicata in "Lingua:" (es. it, en, fr, es, ar, zh). L'app e l'utente si sono regolati su quella scelta.
 • CUT-OFF OTTOBRE 2023 — REGOLA FISSA:
   - Richieste su fatti/eventi PRIMA di ottobre 2023: NON fare ricerche web. Rispondi solo con la tua conoscenza (non chiamare web_search).
   - Richieste su fatti/eventi DOPO ottobre 2023 (da allora in poi, senza limite): DEVI fare ricerche web; non puoi rispondere senza aver effettuato web_search. Esempio: se oggi è il 12 febbraio e ti chiedono una cosa del 12 febbraio, non la sai dalla tua conoscenza — devi cercare. Se i dati sembrano vecchi, rifai con time_range "day".
@@ -532,15 +823,17 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISO}.
 • SE web_search RESTITUISCE ERRORE (es. "Tavily non configurato" o errore di rete): Non dire "controlla tu". Di' che al momento la ricerca live non è disponibile e suggerisci dove verificare: "Puoi controllare su gazzetta.it o flashscore.it per i risultati aggiornati."
 
 • SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
-
+${onboardingBlock}
+${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, Oxy Key, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
 Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
 }
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { idToken, apiKey: clientApiKey, history, message, imageBase64, language, moduleName, customAiName, voiceId, userName, nowStr, dateISO, initialMessage } = req.body;
-    if (!idToken && !clientApiKey) {
-      return res.status(400).json({ error: 'idToken o apiKey richiesti' });
+    const { idToken, apiKey: clientApiKey, geminiApiKey: clientGeminiKey, history, message, imageBase64, language, moduleName, customAiName, voiceId, userName, nowStr, dateISO, initialMessage } = req.body;
+    const useGemini = isValidGeminiKey(clientGeminiKey);
+    if (!idToken && !clientApiKey && !useGemini) {
+      return res.status(400).json({ error: 'idToken, Oxy Key o chiave Gemini richiesti' });
     }
 
     let openaiKey = null;
@@ -565,25 +858,46 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
           const active = mode === 'subscription'
             ? computeSubscriptionActive(billing)
             : status === 'paid';
-          // Per proteggere i costi: OPENAI_API_KEY solo per abbonamenti (non per Lifetime)
+          // OPENAI_API_KEY per abbonamenti, per trial, o per piano free (nessun billing = free)
           if (active && mode === 'subscription') openaiKey = OPENAI_API_KEY;
+          else if (!billing) openaiKey = OPENAI_API_KEY; // piano free: nessun record billing
         }
       } catch (_) {
         // token non valido → si passa all'eventuale apiKey client
       }
     }
+    // Credito pacchetto token: se ha balance > 0 usa la nostra chiave (fiducia cliente = consumo reale)
+    let useTokenPack = false;
+    if (!openaiKey && uid && OPENAI_API_KEY) {
+      const balance = await readTokenBalance(uid);
+      if (balance > 0) {
+        openaiKey = OPENAI_API_KEY;
+        useTokenPack = true;
+      }
+    }
     if (!openaiKey && clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-')) {
       openaiKey = clientApiKey.trim();
     }
-    if (!openaiKey) {
-      return res.status(400).json({ error: 'Oxy Key non configurata o non autorizzato. Inserisci la tua chiave nelle impostazioni o accedi come Master.' });
+    if (!openaiKey && !useGemini) {
+      return res.status(400).json({ error: 'Oxy Key o chiave Gemini non configurata. Inserisci una chiave nelle impostazioni o accedi come Master.' });
     }
 
-    // Trial restrictions & daily limit (solo quando si usa la chiave server OPENAI_API_KEY)
-    if (uid && openaiKey === OPENAI_API_KEY) {
+    // Vision AI: con Gemini (chiave utente) consentita; con OpenAI solo piani Pro/Elite.
+    if (imageBase64 && uid && !useGemini) {
+      const billingForVision = billingSnapshot || (await readBilling(uid));
+      const planId = billingForVision?.planId || '';
+      const visionNotAllowed = ['sub_starter', 'sub_starter_annual', 'life_starter'].includes(planId);
+      if (visionNotAllowed && (billingForVision?.status === 'active' || billingForVision?.status === 'trialing' || billingForVision?.status === 'paid')) {
+        return res.status(403).json({ error: 'vision_requires_pro_plan' });
+      }
+    }
+
+    // Trial / Free / Subscription: restrizioni e limite giornaliero (solo quando si usa la chiave server, non pacchetto token)
+    if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack) {
       const billing = billingSnapshot || (await readBilling(uid));
       const status = billing?.status || 'none';
       const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+      const isFree = !billing || status === 'free' || mode === 'free';
       const isTrial = status === 'trialing' && mode === 'subscription';
       if (isTrial && billing?.trialEndsAt && isIsoPast(billing.trialEndsAt)) {
         return res.status(403).json({ error: 'Trial scaduta. Attiva un abbonamento per continuare.' });
@@ -591,16 +905,24 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       if (isTrial && imageBase64) {
         return res.status(403).json({ error: 'Vision AI non disponibile durante la trial. Attiva un abbonamento per usare le immagini.' });
       }
-      if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
+      // Vision: bloccata per free (e già per Starter/trial)
+      if (imageBase64 && isFree) {
+        return res.status(403).json({ error: 'Vision AI disponibile con abbonamento o Lifetime. Vai ad Abbonamento per sbloccarla.' });
+      }
+      const day = dateISO();
+      const used = await readChatUsage(uid, day);
+      let limit = null;
+      if (isFree) {
+        limit = FREE_DAILY_LIMIT;
+      } else if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
         const planId = billing?.planId || BILLING_TRIAL_PLAN_ID || 'sub_starter';
-        const limit = isTrial
+        const limitKey = normalizePlanIdForLimits(planId);
+        limit = isTrial
           ? BILLING_TRIAL_DAILY_LIMIT
-          : (DAILY_LIMITS_BY_PLAN[planId] || BILLING_TRIAL_DAILY_LIMIT);
-        const day = dateISO();
-        const used = await readChatUsage(uid, day);
-        if (used >= limit) {
-          return res.status(429).json({ error: `Limite giornaliero raggiunto (${limit} messaggi/giorno). Riprova domani o passa a un piano superiore.` });
-        }
+          : (DAILY_LIMITS_BY_PLAN[limitKey] || BILLING_TRIAL_DAILY_LIMIT);
+      }
+      if (limit != null && used >= limit) {
+        return res.status(429).json({ error: 'daily_high_priority_credits_used' });
       }
     }
 
@@ -611,6 +933,23 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       ? `Identità: ${memories.identitySummary || '-'}. Obiettivi: ${goalsStr || '-'}. Fatti chiave: ${keyFactsStr || '-'}. Ultimo contesto: ${memories.lastContext || '-'}.`
       : '';
 
+    let diaryBlock = '';
+    if (uid) {
+      try {
+        const diaryData = await readDiary(uid);
+        const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
+        const lastN = entries.slice(-15).map((e) => `[${e.date || ''}] ${(e.content || e.text || '').trim()}`).filter(Boolean);
+        diaryBlock = lastN.length > 0 ? lastN.join('\n') : '';
+      } catch (_) {}
+    }
+
+    const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
+    // Modello per tier (Free/Starter = mini, Pro = 4o, Elite = 4-turbo); usato in system prompt e in payload
+    let chatModel = OPENAI_CHAT_MODEL;
+    if (uid && openaiKey) {
+      const billingForModel = billingSnapshot || (await readBilling(uid));
+      chatModel = getChatModelForPlan(billingForModel?.planId, !billingForModel || billingForModel?.status === 'free' || billingForModel?.mode === 'free', useTokenPack);
+    }
     const messages = [];
     const systemContent = buildOxySystemPrompt({
       customAiName: customAiName || 'OXY',
@@ -621,7 +960,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       language: language || 'it',
       moduleName: moduleName || 'default',
       memoryBlock,
+      diaryBlock: diaryBlock || undefined,
       hasImage: !!imageBase64,
+      initialOnboarding: isInitialMessage,
+      chatModel,
     });
     messages.push({ role: 'system', content: systemContent });
 
@@ -631,7 +973,11 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       }
     }
 
-    const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
+    const onboardingUserPromptEn = "[The user just opened the chat. Send your ONE first message as a Performance Coach: a single powerful question that touches Ambition, Current challenges, or Future vision. Alpha, professional tone. No lists, no 'How can I help'. One question that makes them think.]";
+    const onboardingUserPromptIt = "[L'utente ha appena aperto la chat. Invia il tuo UNICO primo messaggio come Performance Coach: una sola domanda potente che tocchi Ambizione, Problemi attuali o Visione futura. Tono diretto e ambizioso. Niente liste, niente 'Come posso aiutarti'. Una domanda che faccia pensare.]";
+    const lang = (language || 'it').toLowerCase().startsWith('en') ? 'en' : 'it';
+    const onboardingUserPrompt = lang === 'en' ? onboardingUserPromptEn : onboardingUserPromptIt;
+
     if (imageBase64) {
       messages.push({
         role: 'user',
@@ -643,7 +989,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     } else if (isInitialMessage) {
       messages.push({
         role: 'user',
-        content: "[L'utente ha appena aperto la chat. Scrivi un UNICO primo messaggio breve e caloroso, come farebbe un amico/amica quando ti vede. Una frase accogliente, morbida. Niente liste di domande, niente 'Come posso aiutarti'. Solo un saluto amichevole.]",
+        content: onboardingUserPrompt,
       });
     } else {
       messages.push({ role: 'user', content: message || '' });
@@ -666,6 +1012,20 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       return false;
     };
 
+    // Percorso Gemini (chiave utente, costo zero per noi): solo conversazione, niente tool.
+    if (useGemini) {
+      try {
+        const result = await callGeminiChat(messages, clientGeminiKey.trim(), imageBase64 || undefined);
+        return res.json({ answer: result.text, initialMessage: isInitialMessage });
+      } catch (e) {
+        if (e.message === 'RATE_LIMIT_GEMINI') {
+          return res.status(429).json({ error: 'Limite richieste Gemini raggiunto. Riprova tra qualche minuto.' });
+        }
+        console.error('[Backend] Gemini error:', e?.message || e);
+        return res.status(500).json({ error: e?.message || 'Errore temporaneo Gemini. Riprova.' });
+      }
+    }
+
     const useTools = !imageBase64;
     const dateISOForTool = dateISO || new Date().toISOString().slice(0, 10);
     const tools = [WEB_SEARCH_TOOL(dateISOForTool), SAVE_MEMORY_TOOL, CLEAR_MEMORY_TOOL];
@@ -675,7 +1035,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       return res.status(503).json({ error: 'Ricerca web non disponibile (TAVILY_API_KEY non configurata sul server). Riprova più tardi.' });
     }
     let payload = {
-      model: 'gpt-4o',
+      model: chatModel,
       messages,
       ...(useTools && {
         tools,
@@ -686,6 +1046,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let lastContent = null;
     let maxRounds = useTools ? 5 : 1;
     let round = 0;
+    let totalTokens = 0;
 
     const RATE_LIMIT_RETRY_WAIT_MS = 15000;
     const RATE_LIMIT_MAX_RETRIES = 2;
@@ -713,7 +1074,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       if (!response.ok) {
         const errText = await response.text();
         if (response.status === 429) {
-          return res.status(429).json({ error: 'Troppe richieste in questo momento. Attendi un minuto e riprova.' });
+          return res.status(429).json({ error: 'Forse Oxy si è addormentata. Scrivile solo «Oxy», così si sveglia.' });
         }
         return res.status(response.status).json({ error: 'Errore temporaneo del servizio. Riprova tra poco.' });
       }
@@ -721,6 +1082,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const data = await response.json();
       const msg = data?.choices?.[0]?.message;
       if (!msg) return res.status(500).json({ error: 'Risposta IA non valida' });
+      const usage = data?.usage;
+      totalTokens += (typeof usage?.total_tokens === 'number' ? usage.total_tokens : 0) || ((typeof usage?.prompt_tokens === 'number' ? usage.prompt_tokens : 0) + (typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : 0));
 
       messages.push(msg);
       lastContent = msg.content;
@@ -780,16 +1143,54 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       round++;
     }
 
-    const finalContent = typeof lastContent === 'string' ? lastContent : (lastContent && lastContent[0]?.text) || '';
+    // Estrazione robusta: content può essere string, null, o array di parti { type, text }
+    function extractText(c) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+      if (Array.isArray(c)) {
+        const parts = c.filter((p) => p && typeof p === 'object' && p.type === 'text' && typeof p.text === 'string').map((p) => p.text.trim()).filter(Boolean);
+        return parts.length ? parts.join('\n') : '';
+      }
+      return '';
+    }
+    let finalContent = extractText(lastContent);
+
+    // Se dopo i round la risposta è ancora vuota (es. modello ha restituito solo tool_calls senza testo),
+    // forziamo un ultimo turno senza tool per ottenere una risposta testuale (es. briefing con "oggi").
+    if (!finalContent && messages.length > 0) {
+      const fallbackPayload = {
+        model: payload.model,
+        messages,
+        tool_choice: 'none',
+      };
+      const fallbackRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+        body: JSON.stringify(fallbackPayload),
+      });
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        const fallbackMsg = fallbackData?.choices?.[0]?.message;
+        if (fallbackMsg) finalContent = extractText(fallbackMsg.content);
+        const fu = fallbackData?.usage;
+        totalTokens += (typeof fu?.total_tokens === 'number' ? fu.total_tokens : 0) || ((typeof fu?.prompt_tokens === 'number' ? fu.prompt_tokens : 0) + (typeof fu?.completion_tokens === 'number' ? fu.completion_tokens : 0));
+      }
+    }
+
     if (!finalContent) return res.status(500).json({ error: 'Risposta IA vuota' });
 
-    // Consuma 1 messaggio/giorno solo se la risposta è valida (riduce falsi positivi in caso di errori server)
-    if (uid && openaiKey === OPENAI_API_KEY) {
+    // Conteggio reale: 1 messaggio + token dalle risposte (dato attendibile per l'utente)
+    if (uid) {
       const billing = billingSnapshot || (await readBilling(uid));
       const status = billing?.status || 'none';
       const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
-      if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
-        await incChatUsage(uid, dateISO(), 1);
+      const isSub = mode === 'subscription' && (status === 'active' || status === 'trialing');
+      const isLifetime = mode === 'payment' && status === 'paid';
+      if (isSub || isLifetime) await incUsage(uid, dateISO(), 1, totalTokens);
+      if (useTokenPack) await incUsage(uid, dateISO(), 1, totalTokens);
+      if (useTokenPack && totalTokens > 0) {
+        const balance = await readTokenBalance(uid);
+        const toDeduct = Math.min(totalTokens, balance);
+        if (toDeduct > 0) await deductTokenBalance(uid, toDeduct);
       }
     }
     res.json({ answer: finalContent, initialMessage: isInitialMessage });
@@ -805,6 +1206,51 @@ app.get('/health', (req, res) => res.json({
   time: new Date().toISOString(),
   dataRoot: DATA_ROOT,
 }));
+
+// ——— Landing oxyreal.it: iscrizione newsletter (Brevo) ———
+// Chiama Brevo lato server; la API key resta in .env, mai nel frontend.
+const newsletterLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Troppe richieste. Riprova tra qualche minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post('/api/landing/newsletter', newsletterLimiter, async (req, res) => {
+  try {
+    if (!BREVO_API_KEY) {
+      return res.status(503).json({ error: 'Servizio newsletter non configurato.' });
+    }
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Email non valida.' });
+    }
+    const resBrevo = await fetch('https://api.brevo.com/v3/contacts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': BREVO_API_KEY,
+      },
+      body: JSON.stringify({
+        email,
+        attributes: { FIRSTNAME: name || email.split('@')[0] },
+        listIds: [3],
+        updateEnabled: true,
+      }),
+    });
+    if (resBrevo.ok || resBrevo.status === 204) {
+      return res.status(200).json({ ok: true });
+    }
+    const errBody = await resBrevo.text();
+    console.error('[Backend] Brevo newsletter error:', resBrevo.status, errBody);
+    return res.status(502).json({ error: 'Qualcosa è andato storto. Riprova tra poco.' });
+  } catch (e) {
+    console.error('[Backend] POST /api/landing/newsletter error:', e);
+    return res.status(500).json({ error: 'Errore di connessione. Riprova.' });
+  }
+});
 
 // ——— Documenti (Drive/iCloud/OneDrive via file picker) ———
 // Estrae testo da PDF/DOCX/TXT per poi passarli a OXY come contesto.
@@ -1398,9 +1844,6 @@ app.post('/api/analytics', generalLimiter, async (req, res) => {
     const { uid } = await requireAuth(idToken);
     const { event, ...props } = req.body || {};
     if (!event) return res.status(400).json({ error: 'event richiesto' });
-    if (typeof __dirname !== 'undefined') {
-      console.log('[Analytics]', uid, event, props);
-    }
     res.status(201).json({ ok: true });
   } catch (e) {
     res.status(401).json({ error: 'Token mancante o non valido' });
@@ -1457,7 +1900,7 @@ app.post('/api/diary', generalLimiter, async (req, res) => {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
     const { uid } = await requireAuth(idToken);
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
-    const { theme, content, progressSummary } = req.body || {};
+    const { theme, content, progressSummary, deleteEntryId } = req.body || {};
 
     // Validazione input rigorosa
     let validTheme = null;
@@ -1485,11 +1928,15 @@ app.post('/api/diary', generalLimiter, async (req, res) => {
       validProgressSummary = summaryVal.value;
     }
 
-    if (!validTheme && !validContent && validProgressSummary == null) {
-      return res.status(400).json({ error: 'Almeno uno tra theme, content o progressSummary deve essere fornito' });
+    const validDeleteEntryId = typeof deleteEntryId === 'string' && deleteEntryId.trim().length > 0 ? deleteEntryId.trim() : null;
+    if (!validTheme && !validContent && validProgressSummary == null && !validDeleteEntryId) {
+      return res.status(400).json({ error: 'Almeno uno tra theme, content, progressSummary o deleteEntryId deve essere fornito' });
     }
 
     const current = await readDiary(uid) || { themes: [], entries: [], progressSummary: '' };
+    if (validDeleteEntryId) {
+      current.entries = Array.isArray(current.entries) ? current.entries.filter((e) => e.id !== validDeleteEntryId) : [];
+    }
     if (validTheme) {
       const exists = current.themes.find((t) => t.id === validTheme.id);
       if (!exists) current.themes = [...(current.themes || []), validTheme];
@@ -1642,6 +2089,68 @@ async function writeBilling(uid, data) {
   await fs.writeFile(billingPath(uid), JSON.stringify(payload, null, 0), 'utf8');
 }
 
+// ——— User meta (early adopters, share-for-discount): data/users/{uid}.json
+async function ensureUsersDir() {
+  await fs.mkdir(USERS_DIR, { recursive: true });
+}
+
+function userMetaPath(uid) {
+  const safe = (uid || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(USERS_DIR, `${safe}.json`);
+}
+
+async function readUserMeta(uid) {
+  if (!uid) return null;
+  try {
+    const raw = await fs.readFile(userMetaPath(uid), 'utf8');
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeUserMeta(uid, data) {
+  if (!uid || !data || typeof data !== 'object') return;
+  await ensureUsersDir();
+  const payload = { ...data, uid, updatedAt: new Date().toISOString() };
+  await fs.writeFile(userMetaPath(uid), JSON.stringify(payload, null, 0), 'utf8');
+}
+
+/** Crea record utente con createdAt se non esiste (per sapere chi ha "scaricato" l'app / early adopter). */
+async function ensureUserMeta(uid) {
+  if (!uid) return null;
+  const existing = await readUserMeta(uid);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  await writeUserMeta(uid, { createdAt: now });
+  return { createdAt: now };
+}
+
+/** Trova l'uid che ha questa stripeSubscriptionId (per webhook subscription.deleted dove metadata non è popolato). */
+async function findUidByStripeSubscriptionId(subscriptionId) {
+  if (!subscriptionId || typeof subscriptionId !== 'string') return null;
+  await ensureBillingDir();
+  let files = [];
+  try {
+    files = await fs.readdir(BILLING_DIR);
+  } catch {
+    return null;
+  }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    const uid = file.replace(/\.json$/, '');
+    try {
+      const raw = await fs.readFile(path.join(BILLING_DIR, file), 'utf8');
+      const data = JSON.parse(raw);
+      if (data && data.stripeSubscriptionId === subscriptionId) return uid;
+    } catch {
+      // ignore parse/read errors
+    }
+  }
+  return null;
+}
+
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   try {
@@ -1655,7 +2164,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const planIdVal = validateString(planId, 'planId', 50, 1);
     if (!planIdVal.valid) return res.status(400).json({ error: planIdVal.error });
 
-    const validPlanIds = Object.keys(STRIPE_PRICE_MAP);
+    const validPlanIds = [...new Set([...Object.keys(STRIPE_PRICE_MAP), ...Object.keys(TOKEN_PACK_AMOUNTS)])].filter(Boolean);
     if (!validPlanIds.includes(planIdVal.value)) {
       return res.status(400).json({ error: `planId non valido. Valori accettati: ${validPlanIds.join(', ')}` });
     }
@@ -1677,8 +2186,8 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const isSubscription = planIdVal.value.startsWith('sub_');
     const mode = isSubscription ? 'subscription' : 'payment';
 
-    const successUrl = STRIPE_SUCCESS_URL || 'https://example.com/oxy/success';
-    const cancelUrl = STRIPE_CANCEL_URL || 'https://example.com/oxy/cancel';
+    const successUrl = STRIPE_SUCCESS_URL || 'oxyreal://billing/success';
+    const cancelUrl = STRIPE_CANCEL_URL || 'oxyreal://billing/cancel';
 
     const session = await stripe.checkout.sessions.create({
       mode,
@@ -1710,6 +2219,8 @@ app.get('/api/billing/status', billingLimiter, async (req, res) => {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
     const { uid } = await requireAuth(idToken);
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    // Registra primo accesso per early-adopter / 50% sconto (sempre, anche se ha già billing)
+    await ensureUserMeta(uid);
     const data = await readBilling(uid);
     if (!data) {
       // Trial auto-assegnata (se abilitata) — utile per go-live senza pagamenti immediati.
@@ -1725,19 +2236,36 @@ app.get('/api/billing/status', billingLimiter, async (req, res) => {
           trialEndsAt: ends,
           grantedBy: 'trial',
         });
+        const day = dateISO();
+        const used = await readChatUsage(uid, day);
+        const tokensUsed = await readTokenUsage(uid, day);
+        const tokenBalance = await readTokenBalance(uid);
+        const limitKey = normalizePlanIdForLimits(planId);
+        const limit = DAILY_LIMITS_BY_PLAN[limitKey] ?? BILLING_TRIAL_DAILY_LIMIT;
         return res.json({
           active: true,
           status: 'trialing',
           planId,
           mode: 'subscription',
           trialEndsAt: ends,
+          usage: { used, limit, tokensUsed, tokenBalance },
         });
       }
+      // Piano gratuito: nessun abbonamento/Lifetime, 5 msg/giorno con chiave server
+      await ensureUserMeta(uid); // registra utente (createdAt) per early-adopter / 50% sconto
+      const userMeta = await readUserMeta(uid);
+      const day = dateISO();
+      const used = await readChatUsage(uid, day);
+      const tokensUsed = await readTokenUsage(uid, day);
+      const tokenBalance = await readTokenBalance(uid);
+      const limit = FREE_DAILY_LIMIT;
       return res.json({
         active: false,
-        status: 'none',
-        planId: null,
-        mode: null,
+        status: 'free',
+        planId: 'free',
+        mode: 'free',
+        usage: { used, limit, tokensUsed, tokenBalance },
+        ...(userMeta?.sharedForDiscount && { sharedForDiscount: true, sharedAt: userMeta.sharedAt }),
       });
     }
     const status = data.status || 'unknown';
@@ -1748,16 +2276,90 @@ app.get('/api/billing/status', billingLimiter, async (req, res) => {
     const active = mode === 'payment'
       ? status === 'paid'
       : computeSubscriptionActive(data);
+    const day = dateISO();
+    const usedToday = await readChatUsage(uid, day);
+    const tokensUsed = await readTokenUsage(uid, day);
+    const tokenBalance = await readTokenBalance(uid);
+    let usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
+    if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
+      const planId = data.planId || BILLING_TRIAL_PLAN_ID || 'sub_starter';
+      const limitKey = normalizePlanIdForLimits(planId);
+      usage = {
+        used: usedToday,
+        limit: DAILY_LIMITS_BY_PLAN[limitKey] ?? BILLING_TRIAL_DAILY_LIMIT,
+        tokensUsed,
+        tokenBalance,
+      };
+    } else if (mode === 'payment' && status === 'paid') {
+      usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
+    }
     res.json({
       active,
       status,
       planId: data.planId || null,
       mode,
+      usage,
       ...(data.trialEndsAt ? { trialEndsAt: data.trialEndsAt } : {}),
     });
   } catch (e) {
     console.error('[Backend] GET /api/billing/status error:', e);
     res.status(500).json({ error: 'Errore durante la verifica dello stato abbonamento. Riprova più tardi.' });
+  }
+});
+
+// POST /api/user/share-done — registra che l'utente ha condiviso l'app (per 50% sconto quando si attivano i piani)
+app.post('/api/user/share-done', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    await ensureUserMeta(uid);
+    const meta = await readUserMeta(uid);
+    const now = new Date().toISOString();
+    if (meta?.sharedForDiscount) {
+      return res.json({ ok: true, sharedForDiscount: true, sharedAt: meta.sharedAt });
+    }
+    await writeUserMeta(uid, { ...meta, sharedForDiscount: true, sharedAt: now });
+    res.json({ ok: true, sharedForDiscount: true, sharedAt: now });
+  } catch (e) {
+    console.error('[Backend] POST /api/user/share-done error:', e);
+    res.status(500).json({ error: 'Errore. Riprova più tardi.' });
+  }
+});
+
+// Piani assegnabili via admin (grant-plan) — solo abbonamenti e Lifetime, non pacchetti token
+const GRANTABLE_PLAN_IDS = ['sub_starter', 'sub_pro', 'sub_elite', 'life_starter', 'life_pro', 'life_elite'];
+
+// POST /api/admin/grant-plan — solo Master: assegna un piano a un utente (per test dopo pagamento Stripe in fase test).
+// Body: { "planId": "sub_starter" | "sub_pro" | "sub_elite" | "life_starter" | "life_pro" | "life_elite", "uid"?: "..." }.
+// Se uid manca, si assegna al Master. Utile quando il webhook Stripe non è ancora configurato e hai già pagato in test.
+app.post('/api/admin/grant-plan', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid: bodyUid, planId: bodyPlanId } = req.body || {};
+    const { uid, email } = await requireAuth(idToken);
+    if (!uid || !email) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!MASTER_EMAIL || email !== MASTER_EMAIL) {
+      return res.status(403).json({ error: 'Solo il proprietario (Master) può usare questo endpoint.' });
+    }
+    const planId = typeof bodyPlanId === 'string' ? bodyPlanId.trim() : '';
+    if (!GRANTABLE_PLAN_IDS.includes(planId)) {
+      return res.status(400).json({ error: `planId non valido. Usa uno di: ${GRANTABLE_PLAN_IDS.join(', ')}` });
+    }
+    const targetUid = typeof bodyUid === 'string' && bodyUid.trim() ? bodyUid.trim() : uid;
+    const mode = planId.startsWith('sub_') ? 'subscription' : 'payment';
+    const status = mode === 'subscription' ? 'active' : 'paid';
+    await writeBilling(targetUid, {
+      uid: targetUid,
+      planId,
+      mode,
+      status,
+      grantedBy: 'admin',
+    });
+    return res.json({ ok: true, planId, mode, status, uid: targetUid });
+  } catch (e) {
+    console.error('[Backend] POST /api/admin/grant-plan error:', e);
+    res.status(500).json({ error: 'Errore durante l\'assegnazione.' });
   }
 });
 
@@ -1780,11 +2382,138 @@ app.post('/api/admin/grant-elite', billingLimiter, async (req, res) => {
       status: 'active',
       grantedBy: 'admin',
     });
-    console.log('[Backend] Elite granted for uid:', targetUid);
     return res.json({ ok: true, planId: 'sub_elite', uid: targetUid });
   } catch (e) {
     console.error('[Backend] POST /api/admin/grant-elite error:', e);
     res.status(500).json({ error: 'Errore durante l\'assegnazione.' });
+  }
+});
+
+// POST /api/me/delete-account — Self-service: l'utente autenticato richiede la cancellazione del proprio account. Elimina da Firebase Auth e tutti i dati backend (chat, memoria, diario, billing, storie, usage, credits). Richiesto dal legale per GDPR (diritto all'oblio). Conferma avvocato: "È esattamente ciò che serve per essere GDPR compliant al 100%."
+app.post('/api/me/delete-account', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const safe = uid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const deleted = [];
+
+    if (firebaseInitialized) {
+      try {
+        await admin.auth().deleteUser(uid);
+        deleted.push('firebase_auth');
+      } catch (e) {
+        if (e?.code !== 'auth/user-not-found') {
+          console.error('[Backend] delete-account Firebase deleteUser error:', e?.message);
+          return res.status(500).json({ error: 'Errore cancellazione utente: ' + (e?.message || '') });
+        }
+      }
+    }
+
+    const filesToTry = [
+      [DATA_DIR, `${safe}.json`],
+      [MEMORIES_DIR, `${safe}.json`],
+      [BILLING_DIR, `${safe}.json`],
+      [DIARY_DIR, `${safe}.json`],
+      [STORY_STATE_DIR, `${safe}.json`],
+      [CREDITS_DIR, `${safe}.json`],
+      [USERS_DIR, `${safe}.json`],
+    ];
+    for (const [dir, file] of filesToTry) {
+      const p = path.join(dir, file);
+      try {
+        await fs.unlink(p);
+        deleted.push(path.basename(dir) + '/' + file);
+      } catch (_) {}
+    }
+
+    try {
+      const usageFiles = await fs.readdir(USAGE_DIR);
+      for (const f of usageFiles) {
+        if (f.endsWith(`_${safe}.json`)) {
+          await fs.unlink(path.join(USAGE_DIR, f));
+          deleted.push('usage/' + f);
+        }
+      }
+    } catch (_) {}
+
+    return res.json({ ok: true, deleted });
+  } catch (e) {
+    console.error('[Backend] POST /api/me/delete-account error:', e);
+    res.status(500).json({ error: e?.message || 'Errore durante la cancellazione.' });
+  }
+});
+
+// POST /api/admin/delete-user-data — solo Master: cancella utente da Firebase Auth e tutti i dati backend (chat, billing, memoria, diario, storie, usage, credits). Così puoi riusare la stessa email per test.
+app.post('/api/admin/delete-user-data', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid: bodyUid, email: bodyEmail } = req.body || {};
+    const { uid: callerUid, email: callerEmail } = await requireAuth(idToken);
+    if (!callerUid || !callerEmail) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!MASTER_EMAIL || callerEmail !== MASTER_EMAIL) {
+      return res.status(403).json({ error: 'Solo il proprietario (MASTER_EMAIL) può usare questo endpoint.' });
+    }
+    let targetUid = typeof bodyUid === 'string' && bodyUid.trim() ? bodyUid.trim() : null;
+    if (!targetUid && typeof bodyEmail === 'string' && bodyEmail.trim()) {
+      if (!firebaseInitialized) return res.status(503).json({ error: 'Firebase non inizializzato' });
+      try {
+        const userRecord = await admin.auth().getUserByEmail(bodyEmail.trim().toLowerCase());
+        targetUid = userRecord?.uid || null;
+      } catch (e) {
+        if (e?.code === 'auth/user-not-found') return res.status(404).json({ error: 'Nessun utente con questa email' });
+        throw e;
+      }
+    }
+    if (!targetUid) return res.status(400).json({ error: 'Fornisci uid o email nel body (es. { "email": "test@example.com" })' });
+
+    const safe = targetUid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const deleted = [];
+
+    if (firebaseInitialized) {
+      try {
+        await admin.auth().deleteUser(targetUid);
+        deleted.push('firebase_auth');
+      } catch (e) {
+        if (e?.code !== 'auth/user-not-found') {
+          console.error('[Backend] delete-user-data Firebase deleteUser error:', e?.message);
+          return res.status(500).json({ error: 'Errore cancellazione utente Firebase: ' + (e?.message || '') });
+        }
+      }
+    }
+
+    const filesToTry = [
+      [DATA_DIR, `${safe}.json`],
+      [MEMORIES_DIR, `${safe}.json`],
+      [BILLING_DIR, `${safe}.json`],
+      [DIARY_DIR, `${safe}.json`],
+      [STORY_STATE_DIR, `${safe}.json`],
+      [CREDITS_DIR, `${safe}.json`],
+      [USERS_DIR, `${safe}.json`],
+    ];
+    for (const [dir, file] of filesToTry) {
+      const p = path.join(dir, file);
+      try {
+        await fs.unlink(p);
+        deleted.push(path.basename(dir) + '/' + file);
+      } catch (_) {}
+    }
+
+    try {
+      const usageFiles = await fs.readdir(USAGE_DIR);
+      for (const f of usageFiles) {
+        if (f.endsWith(`_${safe}.json`)) {
+          await fs.unlink(path.join(USAGE_DIR, f));
+          deleted.push('usage/' + f);
+        }
+      }
+    } catch (_) {}
+
+    return res.json({ ok: true, uid: targetUid, deleted });
+  } catch (e) {
+    console.error('[Backend] POST /api/admin/delete-user-data error:', e);
+    res.status(500).json({ error: e?.message || 'Errore durante la cancellazione.' });
   }
 });
 
@@ -1828,20 +2557,48 @@ app.post('/api/billing/webhook', async (req, res) => {
       const uid = metadata.uid;
       const planId = metadata.planId;
       if (uid && planId) {
-        const mode = session.mode || (planId.startsWith('sub_') ? 'subscription' : 'payment');
-        const status = mode === 'subscription' ? 'active' : 'paid';
-        await writeBilling(uid, {
-          uid,
-          planId,
-          mode,
-          status,
-          stripeCustomerId: session.customer || null,
-          stripeSubscriptionId: session.subscription || null,
-        });
+        if (planId.startsWith('pack_')) {
+          const amount = TOKEN_PACK_AMOUNTS[planId];
+          if (typeof amount === 'number' && amount > 0) {
+            await addTokenBalance(uid, amount);
+          }
+        } else {
+          const mode = session.mode || (planId.startsWith('sub_') ? 'subscription' : 'payment');
+          const status = mode === 'subscription' ? 'active' : 'paid';
+          await writeBilling(uid, {
+            uid,
+            planId,
+            mode,
+            status,
+            stripeCustomerId: session.customer || null,
+            stripeSubscriptionId: session.subscription || null,
+          });
+          // Email di benvenuto dopo pagamento (se SMTP configurato e WELCOME_EMAIL_AFTER_PAYMENT o DOCS_EMAIL_AUTOSEND_ENABLED)
+          try {
+            const transport = getMailerForWelcome();
+            if (transport && firebaseInitialized) {
+              const userRecord = await admin.auth().getUser(uid);
+              const to = (userRecord?.email || '').trim().toLowerCase();
+              if (to) {
+                const body = getWelcomeEmailBody(planId, mode);
+                await transport.sendMail({
+                  from: SMTP_FROM,
+                  to,
+                  subject: 'Welcome to OXY Real',
+                  text: body,
+                });
+              }
+            }
+          } catch (mailErr) {
+            console.error('[Backend] Welcome email after payment failed:', mailErr?.message || mailErr);
+          }
+        }
       }
     } else if (type === 'customer.subscription.deleted' || type === 'customer.subscription.canceled') {
       const subscription = event.data?.object || {};
-      const uid = subscription.metadata?.uid;
+      // Stripe Checkout non copia metadata dalla session alla subscription: cerchiamo l'utente per subscription.id
+      let uid = subscription.metadata?.uid || null;
+      if (!uid) uid = await findUidByStripeSubscriptionId(subscription.id);
       if (uid) {
         const current = (await readBilling(uid)) || {};
         await writeBilling(uid, {
@@ -1866,7 +2623,9 @@ app.listen(PORT, '0.0.0.0', async () => {
   await ensureMemoriesDir();
   await ensureDiaryDir();
   await ensureStoryStateDir();
-   await ensureBillingDir();
+  await ensureBillingDir();
+  await ensureCreditsDir();
+  await loadOxyKnowledge();
   console.log(`OXY Real backend proxy on port ${PORT}`);
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets || {})) {
