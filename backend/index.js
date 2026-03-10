@@ -1230,19 +1230,20 @@ app.post('/api/landing/newsletter', newsletterLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email non valida.' });
     }
     var firstName = (name && name.length > 0) ? name : email.split('@')[0] || 'Utente';
-    console.log('[Backend] /api/landing/newsletter name=%s firstName=%s', name, firstName);
+    const brevoBody = {
+      email: email,
+      attributes: { FIRSTNAME: firstName },
+      listIds: [3],
+      updateEnabled: true,
+    };
+    console.log('[Backend] Brevo API body:', JSON.stringify(brevoBody, null, 2));
     const resBrevo = await fetch('https://api.brevo.com/v3/contacts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'api-key': BREVO_API_KEY,
       },
-      body: JSON.stringify({
-        email,
-        attributes: { FIRSTNAME: firstName },
-        listIds: [3],
-        updateEnabled: true,
-      }),
+      body: JSON.stringify(brevoBody),
     });
     if (resBrevo.ok || resBrevo.status === 204) {
       return res.status(200).json({ ok: true });
