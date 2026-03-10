@@ -64,6 +64,7 @@ async function loadOxyKnowledge() {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(cors());
 // Nota Stripe: per verificare la firma del webhook serve l'original raw body.
 // Salviamo il buffer raw su req.rawBody prima del parsing JSON.
@@ -1222,11 +1223,14 @@ app.post('/api/landing/newsletter', newsletterLimiter, async (req, res) => {
     if (!BREVO_API_KEY) {
       return res.status(503).json({ error: 'Servizio newsletter non configurato.' });
     }
+    console.log('[Backend] /api/landing/newsletter req.body:', req.body);
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Email non valida.' });
     }
+    var firstName = (name && name.length > 0) ? name : email.split('@')[0] || 'Utente';
+    console.log('[Backend] /api/landing/newsletter name=%s firstName=%s', name, firstName);
     const resBrevo = await fetch('https://api.brevo.com/v3/contacts', {
       method: 'POST',
       headers: {
@@ -1235,7 +1239,7 @@ app.post('/api/landing/newsletter', newsletterLimiter, async (req, res) => {
       },
       body: JSON.stringify({
         email,
-        attributes: { FIRSTNAME: name || email.split('@')[0] },
+        attributes: { FIRSTNAME: firstName },
         listIds: [3],
         updateEnabled: true,
       }),
