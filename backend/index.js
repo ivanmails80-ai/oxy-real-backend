@@ -1232,7 +1232,7 @@ app.post('/api/landing/newsletter', newsletterLimiter, async (req, res) => {
     var firstName = (name && name.length > 0) ? name : email.split('@')[0] || 'Utente';
     const brevoBody = {
       email: email,
-      attributes: { FIRSTNAME: firstName },
+      attributes: { NOME: firstName },
       listIds: [3],
       updateEnabled: true,
     };
