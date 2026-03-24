@@ -1,6 +1,6 @@
 # Prodotti Stripe OXY Real — Informazioni Complete
 
-**IMPORTANTE:** Sostituisci `[PREZZO]` con il prezzo effettivo in EUR (es. `9.99`, `19.99`, `99.00`)
+**Prezzi allineati all’app:** i prezzi sotto sono quelli usati in `src/config/pricingConfig.js`. Per lo sconto lancio 50% (primi 30 gg), in app il prezzo mostrato è **per difetto e senza centesimi** (es. 19 € → 9 €, 39 € → 19 €).
 
 ---
 
@@ -76,14 +76,14 @@ OXY Lifetime Starter
 
 **Descrizione:**
 ```
-Licenza Lifetime OXY Starter - Possiedi OXY Real per sempre. Pagamento una tantum, accesso perpetuo alle funzionalità Starter: chat illimitata con Anima, Memory Vault, input vocale, analisi immagini, e diario interattivo. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento. La tua licenza è tua per sempre.
+Licenza Lifetime OXY Starter - Pagamento una tantum, nessun canone mensile. Accesso alle funzionalità Starter: chat illimitata con Anima, Memory Vault, input vocale, analisi immagini, e diario interattivo. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento.
 ```
 
 **Tipo:** Una tantum  
 **Prezzo:** `90.00` EUR
 
 **Avanzate:**
-- Descrizione del prezzo: `OXY Lifetime Starter - Licenza Perpetua`
+- Descrizione del prezzo: `OXY Lifetime Starter - Pagamento unico`
 - Chiave di ricerca: `oxy_lifetime_starter`
 
 ---
@@ -97,14 +97,14 @@ OXY Lifetime Pro
 
 **Descrizione:**
 ```
-Licenza Lifetime OXY Pro - Possiedi l'esperienza premium per sempre. Pagamento una tantum, accesso perpetuo a tutte le funzionalità Pro: tutto di Starter più ricerca web, storie interattive, e priorità nelle risposte. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento. La tua licenza premium è tua per sempre.
+Licenza Lifetime OXY Pro - Pagamento una tantum, nessun canone mensile. Accesso a tutte le funzionalità Pro: tutto di Starter più ricerca web, storie interattive, e priorità nelle risposte. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento.
 ```
 
 **Tipo:** Una tantum  
 **Prezzo:** `190.00` EUR
 
 **Avanzate:**
-- Descrizione del prezzo: `OXY Lifetime Pro - Licenza Perpetua`
+- Descrizione del prezzo: `OXY Lifetime Pro - Pagamento unico`
 - Chiave di ricerca: `oxy_lifetime_pro`
 
 ---
@@ -118,14 +118,14 @@ OXY Lifetime Elite
 
 **Descrizione:**
 ```
-Licenza Lifetime OXY Elite - Possiedi il piano definitivo per sempre. Pagamento una tantum, accesso perpetuo a tutte le funzionalità Elite: tutto di Pro più capacità estesa, output prioritario, e accesso anticipato alle nuove funzionalità. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento. La tua licenza Elite è tua per sempre.
+Licenza Lifetime OXY Elite - Pagamento una tantum, nessun canone mensile. Accesso a tutte le funzionalità Elite: tutto di Pro più capacità estesa, output prioritario, e accesso anticipato alle nuove funzionalità. Per le versioni Lifetime è richiesta una chiave API OpenAI personale (i costi di utilizzo dell'API restano a tuo carico). Nessun rinnovo, nessun abbonamento.
 ```
 
 **Tipo:** Una tantum  
 **Prezzo:** `390.00` EUR
 
 **Avanzate:**
-- Descrizione del prezzo: `OXY Lifetime Elite - Licenza Perpetua`
+- Descrizione del prezzo: `OXY Lifetime Elite - Pagamento unico`
 - Chiave di ricerca: `oxy_lifetime_elite`
 
 ---

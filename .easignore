@@ -1,0 +1,37 @@
+# EAS Build archive ignore
+# Esclude cartelle/file non necessari alla build (riduce upload e tempi).
+
+# Extra progetti / export non legati a OXY
+24fish_delivery/
+
+# Dump / estrazioni / artefatti locali
+_apk_extract/
+*.apk
+*.aab
+
+# Dipendenze installate localmente (EAS installa da package-lock)
+node_modules/
+backend/node_modules/
+desktop/node_modules/
+
+# Artefatti di build Android locali (EAS ricostruisce da zero)
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+
+# Screenshot e dump UI / debug (device)
+_device_*.png
+_device_*.xml
+_devlauncher_error*.xml
+_oxy_*.png
+_oxy_*.xml
+_ui*.xml
+
+# Scripts/output temporanei
+scripts/**/out/
+scripts/**/tmp/
+
+# Mac/Windows noise
+Thumbs.db
+desktop.ini

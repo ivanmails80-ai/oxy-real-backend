@@ -1,7 +1,18 @@
 // Config centrale piani e prezzi OXY.
-// Tutti i prezzi sono indicativi e facilmente modificabili qui.
+// TEST: limiti minimi e prezzi 0,10 € per verificare Stripe e limiti messaggi. Per produzione ripristinare: DAILY_LIMITS 50,150,400 e prezzi 19,39,59 / 90,190,390.
 
 export const CURRENCY_DEFAULT = 'EUR';
+
+// Limiti giornalieri (crediti high-priority) — TEST: minimi per velocizzare test.
+export const DAILY_LIMITS = {
+  sub_starter: 5,
+  sub_pro: 10,
+  sub_elite: 15,
+};
+
+
+// Sconto percentuale per abbonamento annuale (es. 20 = Risparmi 20%)
+export const ANNUAL_DISCOUNT_PERCENT = 20;
 
 // Tipi piano:
 // - subscription: abbonamento ricorrente (key inclusa, costi token a carico tuo)
@@ -13,7 +24,10 @@ export const PLANS = [
     group: 'subscription',
     name: 'OXY Pass Starter',
     type: 'subscription',
-    suggestedPrice: 9.9,
+    suggestedPrice: 0.1,
+    suggestedPriceAnnual: null,
+    annualDiscountPercent: ANNUAL_DISCOUNT_PERCENT,
+    annualPlanId: 'sub_starter_annual',
     billingPeriod: 'month',
     description: 'Per chi si avvicina all’IA e vuole un compagno quotidiano leggero.',
     upgradeTargetId: 'sub_pro',
@@ -29,7 +43,8 @@ export const PLANS = [
       community: false,
       cloud: false,
       voices: 'basic',
-      dailyMessageLimit: 50,
+      vision: false, // Vision AI (immagini in chat) da Pro in su
+      dailyMessageLimit: DAILY_LIMITS.sub_starter,
       oxyKeyIncluded: true,
     },
   },
@@ -38,7 +53,10 @@ export const PLANS = [
     group: 'subscription',
     name: 'OXY Pass Pro',
     type: 'subscription',
-    suggestedPrice: 24.9,
+    suggestedPrice: 0.1,
+    suggestedPriceAnnual: null,
+    annualDiscountPercent: ANNUAL_DISCOUNT_PERCENT,
+    annualPlanId: 'sub_pro_annual',
     billingPeriod: 'month',
     description: 'Per freelance e professionisti che usano OXY tutti i giorni.',
     upgradeTargetId: 'sub_elite',
@@ -54,7 +72,8 @@ export const PLANS = [
       community: true,
       cloud: false,
       voices: 'all',
-      dailyMessageLimit: 150,
+      vision: true,
+      dailyMessageLimit: DAILY_LIMITS.sub_pro,
       oxyKeyIncluded: true,
     },
   },
@@ -63,7 +82,10 @@ export const PLANS = [
     group: 'subscription',
     name: 'OXY Pass Elite',
     type: 'subscription',
-    suggestedPrice: 59.0,
+    suggestedPrice: 0.1,
+    suggestedPriceAnnual: null,
+    annualDiscountPercent: ANNUAL_DISCOUNT_PERCENT,
+    annualPlanId: 'sub_elite_annual',
     billingPeriod: 'month',
     description: 'Per power user e imprenditori che vogliono la massima potenza.',
     features: {
@@ -74,7 +96,8 @@ export const PLANS = [
       community: true,
       cloud: true,
       voices: 'all_premium',
-      dailyMessageLimit: 400,
+      vision: true,
+      dailyMessageLimit: DAILY_LIMITS.sub_elite,
       oxyKeyIncluded: true,
     },
   },
@@ -85,15 +108,14 @@ export const PLANS = [
     group: 'lifetime',
     name: 'OXY Lifetime Starter',
     type: 'one_time',
-    suggestedPrice: 99,
+    suggestedPrice: 0.1,
     billingPeriod: 'lifetime',
-    description: 'Accesso per sempre alla versione starter, con la tua Oxy Key.',
+    description: 'Versione Starter con pagamento unico, nessun canone mensile. Usa la tua Oxy Key.',
     upgradeTargetId: 'life_pro',
     upgradePricing: {
-      // differenza secca rispetto al listino Pro (249 - 99)
-      difference: 150,
+      difference: 0.1,
       explainer: 'Hai già pagato parte del percorso: per passare a OXY Lifetime Pro paghi solo la differenza rispetto al prezzo di listino.',
-      example: 'Esempio: da Starter (99 €) a Pro (249 €) → paghi solo 150 €.',
+      example: 'Esempio: da Starter (0,10 €) a Pro (0,10 €) → paghi solo 0,10 €.',
     },
     features: {
       modelsTier: 'entry',
@@ -103,7 +125,8 @@ export const PLANS = [
       community: false,
       cloud: false,
       voices: 'basic',
-      dailyMessageLimit: null, // limite eventualmente imposto dal backend per sicurezza
+      vision: false,
+      dailyMessageLimit: null,
       oxyKeyIncluded: false,
     },
   },
@@ -112,15 +135,14 @@ export const PLANS = [
     group: 'lifetime',
     name: 'OXY Lifetime Pro',
     type: 'one_time',
-    suggestedPrice: 249,
+    suggestedPrice: 0.1,
     billingPeriod: 'lifetime',
     description: 'Per uso personale + lavoro leggero, con la tua Oxy Key.',
     upgradeTargetId: 'life_elite',
     upgradePricing: {
-      // differenza secca rispetto al listino Elite (499 - 249)
-      difference: 250,
+      difference: 0.1,
       explainer: 'Hai già pagato parte del percorso: per passare a OXY Lifetime Elite paghi solo la differenza rispetto al prezzo di listino.',
-      example: 'Esempio: da Pro (249 €) a Elite (499 €) → paghi solo 250 €.',
+      example: 'Esempio: da Pro (0,10 €) a Elite (0,10 €) → paghi solo 0,10 €.',
     },
     features: {
       modelsTier: 'pro',
@@ -130,6 +152,7 @@ export const PLANS = [
       community: true,
       cloud: false,
       voices: 'all',
+      vision: true,
       dailyMessageLimit: null,
       oxyKeyIncluded: false,
     },
@@ -139,9 +162,9 @@ export const PLANS = [
     group: 'lifetime',
     name: 'OXY Lifetime Elite',
     type: 'one_time',
-    suggestedPrice: 499,
+    suggestedPrice: 0.1,
     billingPeriod: 'lifetime',
-    description: 'OXY al massimo livello di oggi, per sempre (con la tua Oxy Key).',
+    description: 'OXY al massimo livello di oggi, con pagamento unico e la tua Oxy Key.',
     features: {
       modelsTier: 'elite',
       memoryVault: 'max',
@@ -150,11 +173,31 @@ export const PLANS = [
       community: true,
       cloud: true,
       voices: 'all_premium',
+      vision: true,
       dailyMessageLimit: null,
       oxyKeyIncluded: false,
     },
   },
 ];
 
+/** Restituisce l'oggetto features del piano (risolve sub_x_annual al piano base). Per limitare funzionalità in base al piano. */
+export const getPlanFeatures = (planId) => {
+  const plan = getPlanForDisplay(planId);
+  return plan?.features ?? null;
+};
+
+/** Sconto lancio 50%: prezzo per difetto (floor) e senza centesimi (intero). */
+export const getLaunchDiscountPrice = (price) => Math.floor(Number(price) * 0.5);
+
+// Pacchetti token (acquisto una tantum: credito consumato in chat con la chiave OXY)
+export const TOKEN_PACKS = [
+  { id: 'pack_100k', nameKey: 'pricing.packs.100k.name', tokens: 100000, suggestedPrice: 5 },
+  { id: 'pack_500k', nameKey: 'pricing.packs.500k.name', tokens: 500000, suggestedPrice: 20 },
+];
+
 export const getPlanById = (id) => PLANS.find((p) => p.id === id) || null;
+/** Restituisce il piano per visualizzazione: risolve sub_x_annual al piano base sub_x. */
+export const getPlanForDisplay = (planId) =>
+  getPlanById(planId) || PLANS.find((p) => p.annualPlanId === planId) || null;
+export const getTokenPackById = (id) => TOKEN_PACKS.find((p) => p.id === id) || null;
 

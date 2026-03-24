@@ -54,6 +54,8 @@ Nel progetto Railway: **Variables** (o **Settings → Environment**) e aggiungi 
 | `STRIPE_PRICE_LIFE_STARTER` | `price_...` | |
 | `STRIPE_PRICE_LIFE_PRO` | `price_...` | |
 | `STRIPE_PRICE_LIFE_ELITE` | `price_...` | |
+| `STRIPE_PRICE_PACK_100K` | `price_...` | Pacchetto token 100k (pagamento una tantum). |
+| `STRIPE_PRICE_PACK_500K` | `price_...` | Pacchetto token 500k (pagamento una tantum). |
 | `STRIPE_SUCCESS_URL` | `https://oxyreal.it/success.html` | Pagina success (o `/success` se configuri redirect). |
 | `STRIPE_CANCEL_URL` | `https://oxyreal.it/cancel.html` | Pagina cancel. |
 
@@ -95,3 +97,24 @@ Sostituisci con l’URL reale ottenuto da Railway (senza `/health`, senza slash 
 6. **Build produzione** (EAS) quando tutto funziona.
 
 Così fai ogni cosa una volta sola in ordine; si torna indietro solo per modifiche puntuali.
+
+---
+
+## Go-live su Render: Persistent Disk e Firebase Admin
+
+Se il backend è già su **Render** (es. https://oxy-real-backend.onrender.com), prima del go-live fai questi due passi.
+
+### Persistent Disk (P0 — dati non si perdono a restart)
+
+1. In **Render Dashboard** → il tuo servizio backend → **Settings**.
+2. Passa a un **piano a pagamento** (serve per i dischi).
+3. **Disks** → **Add Disk** → scegli un nome (es. `data`) e dimensione (es. 1 GB). Il mount path su Render è spesso `/var/data` o simile (controlla la doc Render aggiornata).
+4. Nelle **Environment** del servizio aggiungi (se Render usa un path diverso):
+   - `DATA_ROOT` = path di mount del disco (es. `/var/data`).  
+   Il backend usa già `DATA_ROOT` o, se non impostato, prova `/var/data` e poi `backend/data` in locale. Così chat, memoria, diario e billing restano sul disco e non si perdono a redeploy.
+
+### Firebase Admin (verifica token in produzione)
+
+- Il backend legge **FIREBASE_SERVICE_ACCOUNT_JSON** (JSON del service account in base64). Se è già nelle variabili d’ambiente su Render, Firebase Admin è attivo e la verifica token funziona.
+- Se in produzione i login “non vanno” o ricevi errori di autorizzazione, controlla che su Render la variabile **FIREBASE_SERVICE_ACCOUNT_JSON** sia impostata (stesso valore base64 usato in sviluppo).  
+- **Niente** file su disco in produzione: solo questa variabile.

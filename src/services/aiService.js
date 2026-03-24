@@ -1,5 +1,6 @@
 import { tavilySearch } from './tavilyService';
 import { getPersonalityPromptForVoice } from '../data/voiceOptions';
+import { getBackendBaseUrl } from '../config/backendConfig';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -57,14 +58,17 @@ const WEB_SEARCH_TOOL = (currentDateISO) => ({
 
 /**
  * Chiama l'IA Oxy. Se EXPO_PUBLIC_BACKEND_URL è impostato, usa il backend proxy (chiavi solo lato server).
- * Per utenti Master: passare idToken + useBackendForMaster true; non serve apiKey (il backend usa la sua).
- * Per altri: passare idToken + apiKey (o solo apiKey se backend non usato).
+ * Passare idToken e opzionalmente apiKey (Oxy Key). useBackendForMaster: se true il backend usa la propria chiave (solo lato server).
  */
 /** Messaggio lanciato quando l'utente interrompe la risposta (Ferma). */
 export const ABORTED_MESSAGE = 'Risposta interrotta.';
 
+/** Sentinel per rate limit (429): l'app mostra chat.errorRateLimit nella lingua dell'utente. */
+export const RATE_LIMIT_SENTINEL = 'OXY_RATE_LIMIT_429';
+
 export async function callOxyAi({
   apiKey,
+  geminiApiKey,
   idToken,
   useBackendForMaster,
   userId,
@@ -74,13 +78,13 @@ export async function callOxyAi({
   history,
   message,
   imageBase64,
-  customAiName = 'Anima',
+  customAiName = 'OXY',
   voiceId,
   initialMessage = false,
   signal = null,
 }) {
-  const baseUrl = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
-  const useBackend = !!baseUrl && (idToken || (apiKey && !useBackendForMaster));
+  const baseUrl = getBackendBaseUrl();
+  const useBackend = !!baseUrl && (idToken || (apiKey && !useBackendForMaster) || (geminiApiKey && geminiApiKey.trim().length >= 30));
 
   if (useBackend) {
     const nowStr = getCurrentTimeContext();
@@ -88,14 +92,15 @@ export async function callOxyAi({
     const body = {
       idToken: idToken || undefined,
       apiKey: useBackendForMaster ? undefined : (apiKey || '').trim() || undefined,
+      geminiApiKey: (geminiApiKey || '').trim() || undefined,
       history: history || [],
       message: message || '',
       imageBase64: imageBase64 || undefined,
       language: language || 'it',
       moduleName: moduleName || 'default',
-      customAiName: customAiName || 'Anima',
+      customAiName: customAiName || 'OXY',
       voiceId: voiceId || undefined,
-      userName: (userProfile?.nomeUtente || '').trim() || undefined,
+      userName: (() => { const full = (userProfile?.nomeUtente || '').trim(); const first = full.split(/\s+/)[0]; return first || full || undefined; })(),
       nowStr,
       dateISO,
       ...(initialMessage && { initialMessage: true }),
@@ -113,7 +118,10 @@ export async function callOxyAi({
         signal ?? undefined
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `Errore server: ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429) throw new Error(data?.error || RATE_LIMIT_SENTINEL);
+        throw new Error(data?.error || `Errore server: ${res.status}`);
+      }
       if (!data?.answer) throw new Error('Risposta IA non valida');
       return { answer: data.answer };
     } catch (e) {
@@ -134,7 +142,7 @@ export async function callOxyAi({
   const userName = (userProfile?.nomeUtente || '').trim();
   const nameLine = userName ? `\nL'utente si chiama ${userName}. Usa il suo nome quando appropriato (saluti, chiusure, tono personale).\n` : '';
   const personalityFragment = getPersonalityPromptForVoice(voiceId);
-  const systemPersonality = `Sei ${customAiName} (Oxy), l'anima dell'App del Secolo creata da Ivan. Modello: gpt-4o.${personalityFragment ? ` ${personalityFragment}` : ' Personalità: amica/amico fidato.'}
+  const systemPersonality = `Sei ${customAiName} (OXY). Modello: gpt-4o-mini.${personalityFragment ? ` ${personalityFragment}` : ' Personalità: amica/amico fidato.'}
 ${nameLine}
 REGOLE: Amichevole e morbida nelle risposte. Niente raffiche di domande: capisci l'utente man mano che si scrive. Sincera ma con tatto; niente "Certamente" o "Sono qui per aiutarti". Parla come un amico vero. Basati sull'identità dell'utente. Memoria: ricorda ciò che impari, non chiedere di nuovo.
 
@@ -161,94 +169,43 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISO}. Per dati dopo Ottobre 2023 usa web_
     messages.push({ role: 'user', content: message });
   }
 
-  const useTools = !imageBase64;
+  // SICUREZZA: niente web_search nel client.
+  // La ricerca web live usa Tavily (chiave segreta) e deve stare SOLO sul backend.
+  const useTools = false;
+  /** Allineato al backend: gpt-4o-mini = buon compromesso costo/efficienza; usato quando la chat passa dal client (es. chiave utente) */
   const payload = {
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     messages,
-    ...(useTools && { tools: [WEB_SEARCH_TOOL(dateISO)], tool_choice: 'auto' }),
   };
 
-  let lastContent = null;
-  let maxToolRounds = useTools ? 3 : 1;
-  let round = 0;
-
-  while (round < maxToolRounds) {
-    let response;
-    try {
-      response = await fetchWithTimeout(
-        OPENAI_URL,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(payload),
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      OPENAI_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
         },
-        AI_REQUEST_TIMEOUT_MS,
-        signal ?? undefined
-      );
-    } catch (e) {
-      if (e?.name === 'AbortError') throw new Error(ABORTED_MESSAGE);
-      throw e;
-    }
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Errore IA: ${response.status} ${response.statusText} - ${errText}`);
-    }
-
-    const data = await response.json().catch(() => null);
-    const choice = data?.choices?.[0];
-    const msg = choice?.message;
-
-    if (!msg) {
-      throw new Error('Risposta IA non valida');
-    }
-
-    messages.push(msg);
-    lastContent = msg.content;
-
-    const toolCalls = msg.tool_calls;
-    if (!toolCalls || toolCalls.length === 0) {
-      break;
-    }
-
-    for (const tc of toolCalls) {
-      const fn = tc.function;
-      if (fn?.name !== 'web_search') continue;
-
-      let args = {};
-      try {
-        args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : fn.arguments || {};
-      } catch (_) {}
-
-      const { query, max_results = 5, topic = 'general', time_range } = args;
-      const searchRes = await tavilySearch({
-        query: query || message,
-        maxResults: Math.min(Math.max(1, max_results), 10),
-        topic,
-        timeRange: time_range,
-      });
-
-      const toolContent = searchRes.error
-        ? JSON.stringify({
-            error: searchRes.error,
-            userMessage: 'Ricerca web non configurata. Configura EXPO_PUBLIC_TAVILY_API_KEY (o usa il backend con Tavily) per risposte aggiornate.',
-          })
-        : JSON.stringify({ results: searchRes.results.map((r) => ({ title: r.title, url: r.url, content: r.content })) });
-
-      messages.push({
-        role: 'tool',
-        tool_call_id: tc.id,
-        content: toolContent,
-      });
-    }
-
-    round++;
+        body: JSON.stringify(payload),
+      },
+      AI_REQUEST_TIMEOUT_MS,
+      signal ?? undefined
+    );
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error(ABORTED_MESSAGE);
+    throw e;
   }
 
-  const finalContent = typeof lastContent === 'string' ? lastContent : (lastContent && lastContent[0]?.text) || '';
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Errore IA: ${response.status} ${response.statusText} - ${errText}`);
+  }
+
+  const data = await response.json().catch(() => null);
+  const msg = data?.choices?.[0]?.message;
+  const finalContent = typeof msg?.content === 'string' ? msg.content : (msg?.content && msg.content[0]?.text) || '';
   if (!finalContent) {
     throw new Error('Risposta IA non valida');
   }

@@ -2,11 +2,13 @@
  * Storie a livelli OXY — stato su backend GET/POST /api/stories/state
  */
 
-const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+import { getBackendBaseUrl } from '../config/backendConfig';
+
+const getBaseUrl = () => getBackendBaseUrl();
 
 async function requestWithToken(method, path, idToken, body = null) {
   const base = getBaseUrl();
-  if (!base) throw new Error('EXPO_PUBLIC_BACKEND_URL non impostato');
+  if (!base) throw new Error('Endpoint server non configurato');
   const url = path.startsWith('/') ? `${base}${path}` : `${base}/${path}`;
   const opts = {
     method,
@@ -26,8 +28,7 @@ export async function loadStoryState(idToken) {
   if (!getBaseUrl() || !idToken) return { currentStoryId: null, stepIndex: 0, completed: [] };
   try {
     return await requestWithToken('GET', '/api/stories/state', idToken);
-  } catch (e) {
-    console.warn('[storyService] loadStoryState error:', e?.message);
+  } catch (_) {
     return { currentStoryId: null, stepIndex: 0, completed: [] };
   }
 }

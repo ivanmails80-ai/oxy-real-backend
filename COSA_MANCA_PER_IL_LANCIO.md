@@ -66,7 +66,7 @@ Punto per punto: azioni da completare prima del lancio. Segna con [x] quando hai
   - Aggiornare `version` e `android.versionCode` / `ios.buildNumber` in `app.json` (o dove gestisci le versioni) prima di ogni invio.
 
 - [ ] **EAS Build**
-  - Account Expo/EAS configurato; eseguire build per Android e/o iOS come da `RELEASE_CHECKLIST.md`.
+  - Account Expo/EAS configurato; eseguire build per Android e/o iOS come da `GO_LIVE.md`.
 
 - [ ] **EAS Submit**
   - Dopo build riuscita: invio a Google Play e/o App Store (credenziali, account developer, prima volta configurazione certificati/keystore).

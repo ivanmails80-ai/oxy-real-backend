@@ -51,9 +51,7 @@ export async function persistSession(session) {
       displayName: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
     };
     await SecureStore.setItemAsync(SECURE_KEYS.SESSION, JSON.stringify(payload));
-  } catch (e) {
-    console.warn('[AuthService] persistSession error', e);
-  }
+  } catch (_) {}
 }
 
 /** Ripristina sessione da Firebase (persistenza nativa) e/o SecureStore */
@@ -87,8 +85,7 @@ export async function restoreSessionAndProfile() {
         }
       });
     });
-  } catch (e) {
-    console.warn('[AuthService] restoreSessionAndProfile error', e);
+  } catch (_) {
     return { session: null, profile: null };
   }
 }
@@ -123,9 +120,7 @@ export async function registerWithEmailPassword({ email, password, nome, cognome
   if (user && fullName) {
     try {
       await updateProfile(user, { displayName: fullName });
-    } catch (e) {
-      console.warn('[AuthService] updateProfile error', e);
-    }
+    } catch (_) {}
   }
   const { session, profile } = userToSessionProfile(user);
   await persistSession(session);
@@ -163,13 +158,8 @@ export async function signUpWithProfile(regData) {
 export async function signOut() {
   try {
     await firebaseSignOut(auth);
-  } catch (e) {
-    console.warn('[AuthService] signOut error', e);
-  }
+  } catch (_) {}
   try {
     await SecureStore.deleteItemAsync(SECURE_KEYS.SESSION);
-  } catch (e) {
-    // Su Expo Go / alcuni emulatori SecureStore può lanciare "invalid key provider"; il logout Firebase è già avvenuto
-    console.warn('[AuthService] clear session storage (ignored)', e?.message || e);
-  }
+  } catch (_) {}
 }

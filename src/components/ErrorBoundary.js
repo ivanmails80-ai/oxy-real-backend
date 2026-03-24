@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 
 /**
  * Error Boundary: cattura errori non gestiti nell'albero React e mostra una UI di fallback
@@ -13,9 +13,7 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, errorInfo) {
-    console.error('[ErrorBoundary]', error, errorInfo);
-  }
+  componentDidCatch() {}
 
   handleRetry = () => {
     this.setState({ hasError: false, error: null });
@@ -31,8 +29,10 @@ class ErrorBoundary extends React.Component {
           <Text style={styles.message}>
             L'app ha riscontrato un errore inatteso. Puoi riprovare.
           </Text>
-          {Platform.OS === 'web' && errMsg ? (
-            <Text style={styles.errorDetail} selectable>{errMsg}</Text>
+          {errMsg ? (
+            <ScrollView style={styles.errorScroll} contentContainerStyle={styles.errorScrollContent}>
+              <Text style={styles.errorDetail} selectable>{errMsg}</Text>
+            </ScrollView>
           ) : null}
           <TouchableOpacity style={styles.button} onPress={this.handleRetry} activeOpacity={0.8}>
             <Text style={styles.buttonText}>Riprova</Text>
@@ -65,15 +65,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
   },
+  errorScroll: { maxHeight: 180, width: '100%', marginBottom: 16 },
+  errorScrollContent: { padding: 12 },
   errorDetail: {
     fontSize: 12,
     color: '#ff6b6b',
     textAlign: 'left',
-    marginBottom: 16,
     padding: 12,
     backgroundColor: 'rgba(0,0,0,0.3)',
-    maxWidth: '100%',
-    maxHeight: 200,
   },
   button: {
     backgroundColor: '#c5a059',

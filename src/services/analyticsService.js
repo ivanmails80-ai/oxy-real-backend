@@ -3,7 +3,9 @@
  * Invia a backend POST /api/analytics quando disponibile; altrimenti solo console (dev).
  */
 
-const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+import { getBackendBaseUrl } from '../config/backendConfig';
+
+const getBaseUrl = () => getBackendBaseUrl();
 
 /**
  * Registra un evento (screen_view, feature_used, story_step, diary_entry, ecc.).
@@ -17,9 +19,6 @@ export async function track(event, props = {}, idToken = null) {
     timestamp: new Date().toISOString(),
     ...(typeof props === 'object' && props !== null ? props : {}),
   };
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log('[Analytics]', payload.event, payload);
-  }
   const base = getBaseUrl();
   if (!base || !idToken) return;
   try {

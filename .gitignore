@@ -4,8 +4,15 @@
 .env.*.local
 backend/.env
 
-# Firebase Android (contiene project id; opzionale ignorare se repo privato)
-android/app/google-services.json
+# Firebase Admin service account (SEGRETO: contiene private_key)
+backend/firebase-service-account.json
+backend/firebase-service-account*.json
+backend/*service-account*.json
+backend/credentials*.json
+
+# Firebase Android (contiene project id; per EAS Build serve nel repo)
+# Se vuoi escluderlo da Git, usa un approccio diverso (es. generarlo da secret),
+# ma per ora lo teniamo incluso così le build remote trovano il file.
 
 # Dipendenze e build
 node_modules/
@@ -14,6 +21,11 @@ node_modules/
 .expo/
 dist/
 web-build/
+
+# Android signing (NON committare)
+android/keystore.properties
+android/**/*.jks
+android/**/*.keystore
 
 # OS
 .DS_Store

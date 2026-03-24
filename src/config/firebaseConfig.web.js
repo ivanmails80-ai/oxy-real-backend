@@ -4,19 +4,23 @@
  */
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import Constants from 'expo-constants';
+
+const extra =
+  (Constants?.expoConfig && Constants.expoConfig.extra) ||
+  (Constants?.manifest && Constants.manifest.extra) ||
+  {};
+const firebaseExtra = extra?.firebase || {};
 
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '',
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || '',
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '',
+  // IMPORTANT: use static EXPO_PUBLIC_* access so Expo can inline values at build time.
+  apiKey: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_API_KEY) || firebaseExtra.apiKey || '',
+  authDomain: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN) || firebaseExtra.authDomain || '',
+  projectId: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_PROJECT_ID) || firebaseExtra.projectId || '',
+  storageBucket: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET) || firebaseExtra.storageBucket || '',
+  messagingSenderId: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || firebaseExtra.messagingSenderId || '',
+  appId: (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_FIREBASE_APP_ID) || firebaseExtra.appId || '',
 };
-
-if (typeof __DEV__ !== 'undefined' && __DEV__ && !firebaseConfig.apiKey) {
-  console.warn('[firebaseConfig] Variabili .env non caricate. Riavvia con: npx expo start --clear');
-}
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

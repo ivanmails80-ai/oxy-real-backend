@@ -1,43 +1,16 @@
 /**
  * Servizio Tavily per ricerca web in tempo reale.
- * API Key: https://app.tavily.com → EXPO_PUBLIC_TAVILY_API_KEY in .env
+ *
+ * SICUREZZA:
+ * - Non usare MAI una API key Tavily nel client (anche offuscata è estraibile).
+ * - La ricerca web live va fatta SOLO lato backend (TAVILY_API_KEY in env/secret manager),
+ *   idealmente come parte del flusso /api/chat.
  */
-const TAVILY_URL = 'https://api.tavily.com/search';
 
 export async function tavilySearch({ query, maxResults = 5, topic = 'general', searchDepth = 'advanced', timeRange }) {
-  const apiKey = process.env.EXPO_PUBLIC_TAVILY_API_KEY?.trim();
-  if (!apiKey) {
-    return { error: 'Tavily API key non configurata', results: [] };
-  }
-
-  try {
-    const res = await fetch(TAVILY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        query,
-        max_results: maxResults,
-        topic,
-        search_depth: searchDepth,
-        ...(timeRange && { time_range: timeRange }),
-        include_answer: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.warn('[Tavily] Errore:', res.status, errText);
-      return { error: `Tavily ${res.status}`, results: [] };
-    }
-
-    const data = await res.json();
-    const results = data?.results || [];
-    return { results, answer: data?.answer };
-  } catch (e) {
-    console.warn('[Tavily] Errore:', e);
-    return { error: e?.message || 'Errore ricerca', results: [] };
-  }
+  void query; void maxResults; void topic; void searchDepth; void timeRange;
+  return {
+    error: 'Ricerca web live disponibile solo via backend.',
+    results: [],
+  };
 }

@@ -1,10 +1,11 @@
 /**
  * Feature flags per roadmap OXY (A/B e rollout).
  * Legge da AsyncStorage (override locale) o da backend GET /api/features.
- * Default: tutte le feature della roadmap attive (rollout completo Anima).
+ * Default: tutte le feature della roadmap attive (rollout completo).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getBackendBaseUrl } from '../config/backendConfig';
 
 const STORAGE_KEY = '@oxyreal:featureFlags';
 
@@ -15,6 +16,7 @@ export const FEATURE_KEYS = {
   VOICE_INPUT: 'voiceInput',
   IMAGE_CONTEXT: 'imageContext',
   COMMUNITY: 'community',
+  GROUP_CHAT: 'groupChat',
   REPUTATION: 'reputation',
   AB_TESTS: 'abTests',
 };
@@ -25,7 +27,9 @@ const DEFAULT_FLAGS = {
   [FEATURE_KEYS.STORIES]: true,
   [FEATURE_KEYS.VOICE_INPUT]: true,
   [FEATURE_KEYS.IMAGE_CONTEXT]: true,
-  [FEATURE_KEYS.COMMUNITY]: true,
+  // Non mostrare feature non pronte: se visibili devono essere funzionanti.
+  [FEATURE_KEYS.COMMUNITY]: false,
+  [FEATURE_KEYS.GROUP_CHAT]: false,
   [FEATURE_KEYS.REPUTATION]: true,
   [FEATURE_KEYS.AB_TESTS]: true,
 };
@@ -90,7 +94,7 @@ export async function setLocalOverride(key, value) {
  * @returns {Promise<Object|null>} { diary: true, ... } o null
  */
 export async function fetchServerFlags(idToken) {
-  const base = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+  const base = getBackendBaseUrl();
   if (!base || !idToken) return null;
   try {
     const res = await fetch(`${base}/api/features`, {

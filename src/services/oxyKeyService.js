@@ -1,26 +1,28 @@
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 
 const OXY_KEY_STORE = 'oxy_api_key';
+const GEMINI_KEY_STORE = 'gemini_api_key';
 
-/** Chiave Master (solo .env, Proprietario Prestige) */
-export function getMasterKey() {
-  const k = process.env.EXPO_PUBLIC_OXY_AI_KEY;
-  return k && typeof k === 'string' && k.trim() ? k.trim() : null;
+/** Email del proprietario (Master): da EXPO_PUBLIC_MASTER_EMAIL. Se l'email in login è questa, l'app può non richiedere le checkbox consenso. */
+function getMasterEmail() {
+  const fromExtra = Constants?.expoConfig?.extra?.EXPO_PUBLIC_MASTER_EMAIL;
+  if (fromExtra != null && String(fromExtra).trim()) return String(fromExtra).trim().toLowerCase();
+  return (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_MASTER_EMAIL || '').trim().toLowerCase();
 }
 
-/** True se l'email appartiene al Proprietario Master */
-export function isMasterUser(userEmail) {
-  const masterEmail = process.env.EXPO_PUBLIC_MASTER_EMAIL;
-  if (!masterEmail || !userEmail) return false;
-  return userEmail.trim().toLowerCase() === masterEmail.trim().toLowerCase();
+/** Restituisce true se l'email è quella del proprietario (Master). */
+export function isOwnerEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const master = getMasterEmail();
+  return !!master && email.trim().toLowerCase() === master;
 }
 
-/** Chiave SecureStore (Ospite / Pay-per-use) */
+/** Chiave Oxy Key salvata in SecureStore (utente) */
 export async function getOxyKey() {
   try {
     return await SecureStore.getItemAsync(OXY_KEY_STORE);
-  } catch (e) {
-    console.warn('Errore lettura Oxy Key:', e);
+  } catch (_) {
     return null;
   }
 }
@@ -33,8 +35,7 @@ export async function setOxyKey(key) {
     }
     await SecureStore.setItemAsync(OXY_KEY_STORE, key.trim());
     return true;
-  } catch (e) {
-    console.warn('Errore salvataggio Oxy Key:', e);
+  } catch (_) {
     return false;
   }
 }
@@ -43,8 +44,7 @@ export async function removeOxyKey() {
   try {
     await SecureStore.deleteItemAsync(OXY_KEY_STORE);
     return true;
-  } catch (e) {
-    console.warn('Errore rimozione Oxy Key:', e);
+  } catch (_) {
     return false;
   }
 }
@@ -54,14 +54,43 @@ export function isValidKeyFormat(key) {
   return key && typeof key === 'string' && key.trim().startsWith('sk-') && key.trim().length > 20;
 }
 
-/**
- * IDENTITÀ CHIAVE - Token Independence
- * Determina con certezza quale chiave usare per l'utente corrente.
- * MAI fallback: Master usa SOLO .env, Ospite usa SOLO SecureStore.
- */
-export async function getKeyForCurrentUser(userEmail) {
-  if (isMasterUser(userEmail)) {
-    return getMasterKey();
+/** Chiave Gemini (Google AI): salvata in SecureStore. Gratuita per l'utente, costo zero per noi. */
+export async function getGeminiKey() {
+  try {
+    return await SecureStore.getItemAsync(GEMINI_KEY_STORE);
+  } catch (_) {
+    return null;
   }
+}
+
+export async function setGeminiKey(key) {
+  try {
+    if (!key || !key.trim()) {
+      await SecureStore.deleteItemAsync(GEMINI_KEY_STORE);
+      return false;
+    }
+    await SecureStore.setItemAsync(GEMINI_KEY_STORE, key.trim());
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function removeGeminiKey() {
+  try {
+    await SecureStore.deleteItemAsync(GEMINI_KEY_STORE);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Valida formato chiave Gemini (es. AIza..., lunga almeno 30 caratteri). */
+export function isValidGeminiKeyFormat(key) {
+  return key && typeof key === 'string' && key.trim().length >= 30;
+}
+
+/** Restituisce la chiave da usare per l'utente corrente (solo SecureStore). */
+export async function getKeyForCurrentUser() {
   return await getOxyKey();
 }

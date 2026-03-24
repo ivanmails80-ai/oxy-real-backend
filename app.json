@@ -1,20 +1,22 @@
 {
   "expo": {
-    "name": "SecondSelf",
+    "name": "OXY Real",
     "slug": "secondself",
-    "version": "1.0.0",
+    "scheme": "oxyreal",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#002b4d"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition.",
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone."
@@ -22,7 +24,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#002b4d"
       },
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
@@ -30,16 +32,15 @@
         "android.permission.CAMERA",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.anonymous.secondself",
-      "usesCleartextTraffic": true
+      "versionCode": 16,
+      "package": "com.oxyreal.app"
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "name": "OXY Real - Anima",
-      "description": "Chat con Anima, Memory Vault e Power Badges"
+      "name": "OXY Real",
+      "description": "Chat con OXY, Memory Vault e Power Badges"
     },
     "plugins": [
-      "expo-speech-recognition",
       [
         "expo-image-picker",
         {
@@ -52,11 +53,20 @@
         {
           "microphonePermission": "OXY Real ha bisogno del microfono per registrare messaggi vocali."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
         "projectId": "612d5c63-62b3-4890-a6da-66703911c722"
+      },
+      "firebase": {
+        "apiKey": "AIzaSyCHPkYuKdsKcWQyLC1c6ncG5WfHVSAI034",
+        "authDomain": "oxy-real.firebaseapp.com",
+        "projectId": "oxy-real",
+        "storageBucket": "oxy-real.firebasestorage.app",
+        "messagingSenderId": "304780647729",
+        "appId": "1:304780647729:web:ec3ca14c6fbd7db707e410"
       }
     }
   }

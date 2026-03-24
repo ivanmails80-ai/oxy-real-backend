@@ -1,0 +1,20 @@
+{
+  "name": "oxy-email-support",
+  "version": "1.0.0",
+  "description": "Assistente IA che legge email IMAP e risponde al supporto OXY Real",
+  "type": "module",
+  "main": "run.js",
+  "scripts": {
+    "start": "node run.js",
+    "run-once": "node run.js --once",
+    "check": "node run.js --check"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.6.6",
+    "nodemailer": "^6.9.16",
+    "openai": "^4.73.0"
+  }
+}

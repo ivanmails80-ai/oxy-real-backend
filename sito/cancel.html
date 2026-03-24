@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pagamento Annullato - OXY Real</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            background-image: radial-gradient(ellipse at center, #0d1520 0%, #0a0a0a 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            background: rgba(0, 43, 77, 0.5);
+            border: 1px solid rgba(197, 160, 89, 0.35);
+            border-radius: 12px;
+            padding: 40px 30px;
+        }
+        .icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 30px;
+            background: #ff9800;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #0a0a0a;
+        }
+        h1 { font-size: 28px; margin-bottom: 15px; color: #c5a059; }
+        p { font-size: 16px; line-height: 1.6; color: #d1d1d1; margin-bottom: 30px; }
+        .button {
+            display: inline-block;
+            padding: 14px 30px;
+            background: #c5a059;
+            color: #0a0a0a;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 16px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        .button:hover { background: #d4b068; text-decoration: none; color: #0a0a0a; }
+        .button-secondary { background: transparent; border: 2px solid #c5a059; color: #c5a059; }
+        .button-secondary:hover { background: rgba(197, 160, 89, 0.15); text-decoration: none; color: #c5a059; }
+        .info { margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 14px; color: #888; }
+        .info a { color: #c5a059; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✕</div>
+        <h1>Pagamento Annullato</h1>
+        <p>Il pagamento è stato annullato. Nessun addebito è stato effettuato.</p>
+        <p>Se hai cambiato idea, puoi riprovare in qualsiasi momento dall'app.</p>
+        <a href="oxyreal://cancel" class="button">Torna all'App</a>
+        <a href="index.html" class="button button-secondary">Torna al Sito</a>
+        <div class="info">Assistenza: <a href="mailto:oxy@oxyreal.it">oxy@oxyreal.it</a></div>
+    </div>
+</body>
+</html>

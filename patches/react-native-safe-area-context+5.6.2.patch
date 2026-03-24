@@ -1,0 +1,55 @@
+diff --git a/node_modules/react-native-safe-area-context/android/build.gradle b/node_modules/react-native-safe-area-context/android/build.gradle
+index f324b9a..2069b33 100644
+--- a/node_modules/react-native-safe-area-context/android/build.gradle
++++ b/node_modules/react-native-safe-area-context/android/build.gradle
+@@ -19,8 +19,12 @@ if (project == rootProject) {
+ }
+ 
+ 
++// Usa findProperty per evitare "Cannot query the value of this provider" su build locale Windows
+ def getExtOrDefault(name, defaultValue) {
+-    return rootProject.ext.has(name) ? rootProject.ext.get(name) : defaultValue
++    def v = rootProject.findProperty(name)
++    if (v != null) return v.toString()
++    if (rootProject.ext.has(name)) return rootProject.ext.get(name)
++    return defaultValue
+ }
+ 
+ def isNewArchitectureEnabled() {
+@@ -47,7 +51,8 @@ android {
+         }
+     }
+ 
+-    compileSdkVersion getExtOrDefault('compileSdkVersion', 30)
++    // Valore numerico compatibile con AGP 7.x (root può avere 36 che richiede formato android-36.2)
++    compileSdkVersion 34
+ 
+     // Used to override the NDK path/version on internal CI or by allowing
+     // users to customize the NDK path/version from their root project (e.g. for M1 support)
+@@ -108,17 +113,20 @@ def reactNativeArchitectures() {
+ }
+ 
+ repositories {
+-    google()
+-    maven {
+-        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "$rootDir/../node_modules/react-native/android"
+-    }
+     mavenCentral()
++    google()
++    maven { url "$rootDir/../node_modules/react-native/android" }
++}
++
++// Forza risoluzione da Maven (evita provider non disponibile su build locale Windows)
++configurations.all { conf ->
++    conf.resolutionStrategy.force('com.facebook.react:react-android:0.81.5')
+ }
+ 
+ def kotlin_version = getExtOrDefault('kotlinVersion', project.properties['RNSAC_kotlinVersion'])
+ 
+ dependencies {
+-    implementation 'com.facebook.react:react-native:+'
++    // compileOnly + versione fissa da Maven: niente risoluzione da includeBuild
++    compileOnly 'com.facebook.react:react-android:0.81.5'
+     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+ }

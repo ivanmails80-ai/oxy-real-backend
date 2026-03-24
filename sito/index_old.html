@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>OXY Real — Real Identity</title>
+  <meta name="description" content="OXY Real: chat con memoria, diario e storie. Un assistente AI che ti conosce e ti aiuta a fare passi concreti." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@200;300;400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --accent-gold: #c5a059;
+      --accent-bright: #f1d3a1;
+      --text-light: #e0e0e0;
+      --bg-dark: #001425;
+      --navy: #002b4d;
+      --transition: all 0.5s cubic-bezier(0.165, 0.84, 0.44, 1);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    body, html {
+      font-family: 'Montserrat', sans-serif;
+      background-color: var(--bg-dark);
+      background-image: radial-gradient(ellipse at center, #003158 0%, #001425 70%, #000a12 100%);
+      min-height: 100vh;
+      color: var(--text-light);
+      line-height: 1.6;
+    }
+    a { color: var(--accent-gold); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .top-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 64px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 20, 40, 0.92);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(197, 160, 89, 0.25);
+      z-index: 10000;
+    }
+    .top-logo {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      font-family: 'Cinzel', serif;
+      color: var(--accent-gold);
+      text-decoration: none;
+    }
+    .top-logo-main { font-size: 1.05rem; letter-spacing: 5px; text-transform: uppercase; font-weight: 700; }
+    .top-logo-sub { font-size: 0.65rem; letter-spacing: 3px; font-style: italic; margin-top: -2px; color: rgba(241,211,161,0.95); }
+
+    .top-nav {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      font-family: 'Cinzel', serif;
+      font-size: 0.72rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      text-align: right;
+    }
+    .top-nav a { color: rgba(224,224,224,0.9); text-decoration: none; transition: var(--transition); }
+    .top-nav a:hover { color: var(--accent-gold); text-decoration: none; }
+
+    .wrap { max-width: 980px; margin: 0 auto; padding: 96px 18px 64px; }
+    .hero {
+      padding: 28px 18px;
+      border: 1px solid rgba(197, 160, 89, 0.28);
+      border-radius: 16px;
+      background: radial-gradient(circle at top, rgba(0, 80, 150, 0.42), rgba(0, 30, 60, 0.55));
+      box-shadow: 0 18px 60px rgba(0,0,0,0.7);
+    }
+    .hero h1 {
+      font-family: 'Cinzel', serif;
+      color: var(--accent-gold);
+      letter-spacing: 10px;
+      font-size: clamp(1.8rem, 5vw, 2.7rem);
+      font-weight: 700;
+      text-transform: uppercase;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .hero p {
+      color: #d1d1d1;
+      max-width: 62ch;
+      margin: 0 auto;
+      text-align: center;
+      font-size: 1.02rem;
+      line-height: 1.9;
+      font-weight: 300;
+    }
+    .pill {
+      margin: 18px auto 0;
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(197,160,89,0.45);
+      background: rgba(0,0,0,0.25);
+      color: rgba(255,255,255,0.9);
+      font-size: 0.82rem;
+    }
+    .hero-actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      transition: var(--transition);
+      border: 1px solid rgba(197,160,89,0.55);
+    }
+    .btn-primary { background: var(--accent-gold); color: #0a0a0a; }
+    .btn-primary:hover { transform: translateY(-1px); text-decoration: none; }
+    .btn-secondary { background: transparent; color: var(--accent-gold); }
+    .btn-secondary:hover { background: rgba(197,160,89,0.12); text-decoration: none; }
+
+    section { margin-top: 36px; }
+    .section-title {
+      font-family: 'Cinzel', serif;
+      color: rgba(197,160,89,0.95);
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      font-size: 1rem;
+      margin-bottom: 14px;
+      text-align: center;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid rgba(197, 160, 89, 0.22);
+      border-radius: 14px;
+      background: rgba(0, 43, 77, 0.28);
+      padding: 16px 14px;
+      min-height: 120px;
+    }
+    .card h3 { color: #fff; font-size: 0.95rem; margin-bottom: 8px; }
+    .card p { color: #cfcfcf; font-size: 0.92rem; line-height: 1.7; font-weight: 300; }
+    .note {
+      margin-top: 12px;
+      color: rgba(209,209,209,0.9);
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(197,160,89,0.2);
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 0.92rem;
+      line-height: 1.7;
+    }
+    .download {
+      text-align: center;
+    }
+    .download p { color: #d1d1d1; max-width: 70ch; margin: 0 auto 14px; font-weight: 300; }
+    .download .links { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .muted { color: #888; font-size: 0.9rem; }
+
+    footer {
+      margin-top: 42px;
+      text-align: center;
+      padding: 34px 16px;
+      border-top: 1px solid rgba(197,160,89,0.12);
+      color: #777;
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--accent-gold); }
+
+    @media (max-width: 860px) {
+      .cards { grid-template-columns: 1fr; }
+      .top-nav { gap: 10px; font-size: 0.68rem; letter-spacing: 1.6px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <a href="index.html" class="top-logo" aria-label="OXY Real Home">
+      <span class="top-logo-main">OXY REAL</span>
+      <span class="top-logo-sub">Real Identity</span>
+    </a>
+    <nav class="top-nav" aria-label="Navigazione">
+      <a href="#percheOxy">Perché OXY</a>
+      <a href="#lApp">Funzioni</a>
+      <a href="#piani">Piani</a>
+      <a href="#scarica">Scarica</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <h1>OXY Real</h1>
+      <p>
+        Un assistente AI con memoria: chat, diario e storie per trasformare idee e giornate in passi concreti.
+        OXY non è “solo una chat”: impara il tuo contesto e ti aiuta a continuare.
+      </p>
+      <div style="text-align:center;">
+        <span class="pill">Prodotto premium • accesso riservato • qualità senza compromessi</span>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#scarica">Scarica</a>
+        <a class="btn btn-secondary" href="landing_hype.html">Countdown / anteprima</a>
+      </div>
+    </div>
+
+    <section id="percheOxy">
+      <div class="section-title">Perché OXY</div>
+      <div class="cards">
+        <div class="card">
+          <h3>Memoria utile (controllabile)</h3>
+          <p>Salva obiettivi e cose importanti. OXY usa la memoria per essere coerente nel tempo, non per “fare scena”.</p>
+        </div>
+        <div class="card">
+          <h3>Passi concreti</h3>
+          <p>Non solo motivazione: micro‑azioni, checklist e follow‑up. Le Storie guidano la riflessione, poi si torna in chat.</p>
+        </div>
+        <div class="card">
+          <h3>Design semplice</h3>
+          <p>Una chat che funziona, offline banner chiaro, errori gestiti, e menu con Privacy/Termini sempre disponibili.</p>
+        </div>
+      </div>
+      <div class="note">
+        Nota: alcune funzioni avanzate (es. Vision AI) possono essere abilitate in una fase successiva o con piani dedicati.
+      </div>
+    </section>
+
+    <section id="lApp">
+      <div class="section-title">Funzioni</div>
+      <div class="cards">
+        <div class="card">
+          <h3>Chat con OXY</h3>
+          <p>Conversazione naturale, modalità (Power Badges) e memoria a lungo termine (Memory Vault).</p>
+        </div>
+        <div class="card">
+          <h3>Diario</h3>
+          <p>Scrivi progressi e note: OXY ti aiuta a dare senso al percorso e a vedere i pattern.</p>
+        </div>
+        <div class="card">
+          <h3>Storie</h3>
+          <p>Percorsi brevi a step: leggine uno, prenditi un minuto, poi torna in chat per parlarne.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="piani">
+      <div class="section-title">Piani</div>
+      <div class="download">
+        <p>
+          In questa fase il focus è sulla stabilità e sull’esperienza utente.
+          I piani commerciali saranno attivati appena il prodotto è pronto al 100%.
+        </p>
+        <div class="links">
+          <a class="btn btn-secondary" href="iscrizione.html">Abbonamenti premium</a>
+          <a class="btn btn-secondary" href="acquisto-unica-volta.html">Piani Lifetime premium</a>
+        </div>
+        <p class="muted" style="margin-top:10px;">(Pagine commerciali attive: nessuna trial, solo accesso premium.)</p>
+      </div>
+    </section>
+
+    <section id="scarica">
+      <div class="section-title">Scarica</div>
+      <div class="download">
+        <p>
+          Link di download: li agganciamo qui appena hai la build pronta (APK/AAB o link Play Store).
+          Se vuoi, possiamo anche mettere un link “lista d’attesa” in 2 minuti.
+        </p>
+        <div class="links">
+          <a class="btn btn-primary" href="mailto:oxy@oxyreal.it?subject=OXY%20Real%20-%20Richiesta%20accesso&body=Ciao%2C%20vorrei%20provare%20OXY%20Real.%20Grazie.">Richiedi accesso</a>
+          <a class="btn btn-secondary" href="privacy.html">Privacy</a>
+          <a class="btn btn-secondary" href="termini.html">Termini</a>
+          <a class="btn btn-secondary" href="cookie.html">Cookie</a>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      © 2026 OXY Real · SecondSelf di Ivan Lopez · <a href="mailto:oxy@oxyreal.it">oxy@oxyreal.it</a><br />
+      <a href="privacy.html">Privacy</a> · <a href="termini.html">Termini</a> · <a href="cookie.html">Cookie</a>
+    </footer>
+  </div>
+</body>
+</html>
+

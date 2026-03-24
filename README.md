@@ -22,7 +22,7 @@ npm install @react-native-community/netinfo
 npx expo start
 ```
 
-Per build Android/iOS: `npx expo run:android` / `npx expo run:ios`. Per EAS Build e invio agli store vedi **RELEASE_CHECKLIST.md**. **Lista unica pre-lancio:** **CHECKLIST_DEFINITIVA_GO_LIVE.md**.
+Per build Android/iOS: `npx expo run:android` / `npx expo run:ios`. Per EAS Build, invio agli store e passi go-live vedi **GO_LIVE.md** (unico riferimento).
 
 ## Login social (Google e Apple) — audit 3.1
 
@@ -48,7 +48,7 @@ Le pagine **Privacy policy**, **Termini di servizio** e **Abbonamento e pagament
 
 - **Non** aggiungere ai segreti EAS (né in .env di build): `EXPO_PUBLIC_OXY_AI_KEY`, `EXPO_PUBLIC_TAVILY_API_KEY`. In modalità subscription la chiave sta solo sul backend.
 - **Imposta** nei segreti EAS: `EXPO_PUBLIC_BACKEND_URL` (URL pubblico del backend), tutte le `EXPO_PUBLIC_FIREBASE_*`, e se serve `EXPO_PUBLIC_MASTER_EMAIL` (solo per sviluppo; in produzione userai verifica abbonamento).
-- Riferimento completo: **CHECKLIST_DEFINITIVA_GO_LIVE.md**.
+- Riferimento completo: **GO_LIVE.md**.
 
 ## Supabase
 

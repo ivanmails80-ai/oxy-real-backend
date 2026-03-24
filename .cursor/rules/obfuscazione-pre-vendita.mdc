@@ -7,7 +7,7 @@ alwaysApply: true
 
 Quando l'app OXY Real sarà pronta per la vendita, il codice **deve essere oscurato** e reso **indecifrabile**: nessuno deve poter decifrare il codice dell'app.
 
-- **Checklist:** vedi `CHECKLIST_DEFINITIVA_GO_LIVE.md` sezione 2.6 "Oscuramento del codice (prima della vendita)".
+- **Checklist:** vedi `GO_LIVE.md` sezione "Prima della vendita (codice indecifrabile)".
 - **Dettaglio tecnico:** vedi `docs/OBFUSCAZIONE_CODICE_PRE_VENDITA.md` (obfuscazione JS, ProGuard/R8, EAS Build, test).
 
 In conversazioni su release, store o "app pronta per la vendita", ricordare di includere questo passo e, se richiesto, aiutare a integrare obfuscation nella pipeline di build.

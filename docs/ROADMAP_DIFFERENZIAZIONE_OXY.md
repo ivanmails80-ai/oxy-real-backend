@@ -80,4 +80,17 @@ Da applicare quando si trasformano questi punti in backlog:
 
 ---
 
-*Ultimo aggiornamento: febbraio 2025. Da aggiornare quando si definiscono priorità o si aggiungono dettagli tecnici.*
+## 6. Roadmap post go‑live: OXY Enterprise (es. DHL)
+
+- **Idea business:** dopo il go‑live B2C, preparare una versione **OXY Enterprise** brandizzabile per grandi aziende (es. DHL), con:
+  - tema grafico personalizzato (colori, logo, copy),
+  - backend dedicato (tenant separato, logging, ruoli, policy dati),
+  - eventuali integrazioni con sistemi interni (SSO, ticketing, CRM, knowledge base aziendale).
+- **Modello commerciale (da affinare):**
+  - pacchetto pilot (20–50 utenti) con fee di setup + canone mensile,
+  - pacchetto enterprise (100+ utenti) con setup più ampio, SLA e supporto dedicato.
+- **Nota per dopo il go‑live:** usare contatti personali (es. in DHL) per proporre un **pilot interno** con vestito brandizzato e funzionalità server più professionali.
+
+---
+
+*Ultimo aggiornamento: febbraio 2025 (integrazione nota post go‑live Enterprise). Da aggiornare quando si definiscono priorità o si aggiungono dettagli tecnici.*

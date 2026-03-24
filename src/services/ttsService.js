@@ -1,8 +1,10 @@
 /**
- * TTS Anima — voce naturale OpenAI (tts-1-hd, nova) invece del sintetizzatore di sistema
+ * TTS — voce naturale OpenAI (tts-1-hd) invece del sintetizzatore di sistema
  */
 
-const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+import { getBackendBaseUrl } from '../config/backendConfig';
+
+const getBaseUrl = () => getBackendBaseUrl();
 
 /**
  * Richiede audio della frase al backend (OpenAI TTS).

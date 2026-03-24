@@ -3,14 +3,14 @@ const path = require('path');
 
 // URL esatto: ?platform=web fa servire l'app (AuthScreen/MainScreen) invece della pagina di servizio Expo
 const DEV_URL = 'http://localhost:8081/?platform=web';
-const WINDOW_TITLE = 'OXY Real - Anima';
+const WINDOW_TITLE = 'OXY Real';
 
 const FALLBACK_HTML = `<!DOCTYPE html>
 <html>
   <head><meta charset="utf-8"><title>OXY Real</title></head>
   <body style="margin:0;background:#0a0a0a;color:#d1d1d1;font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box;">
     <div style="text-align:center;max-width:360px;">
-      <h1 style="color:#c5a059;font-size:1.5rem;">OXY Real - Anima</h1>
+      <h1 style="color:#c5a059;font-size:1.5rem;">OXY Real</h1>
       <p style="margin-top:16px;">L'app non è in esecuzione. Avvia dalla cartella principale:</p>
       <pre style="background:#1a1a1a;padding:12px;border-radius:8px;overflow:auto;text-align:left;font-size:14px;">npm run web</pre>
       <p style="margin-top:16px;font-size:14px;">Si aprirà il browser. Poi puoi riavviare questa finestra.</p>

@@ -1,0 +1,56 @@
+diff --git a/node_modules/@react-native-async-storage/async-storage/android/build.gradle b/node_modules/@react-native-async-storage/async-storage/android/build.gradle
+index 4560dc7..f545856 100644
+--- a/node_modules/@react-native-async-storage/async-storage/android/build.gradle
++++ b/node_modules/@react-native-async-storage/async-storage/android/build.gradle
+@@ -45,7 +45,7 @@ android {
+         }
+     }
+ 
+-    compileSdkVersion project.ext.AsyncStorageConfig.compileSdkVersion
++    compileSdkVersion 34
+     // Used to override the NDK path/version by allowing users to customize
+     // the NDK path/version from their root project (e.g. for M1 support)
+     if (rootProject.hasProperty("ndkPath")) {
+@@ -93,14 +93,15 @@ android {
+ }
+ 
+ repositories {
+-    maven {
+-        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "${project.ext.resolveModulePath("react-native")}/android"
+-    }
++    maven { url "${project.ext.resolveModulePath("react-native")}/android" }
+     google()
+     mavenCentral()
+ }
+ 
++configurations.all { conf ->
++    conf.resolutionStrategy.force('com.facebook.react:react-android:0.81.5')
++}
++
+ dependencies {
+     if (useNextStorage) {
+         def room_version = project.ext.AsyncStorageConfig.roomVersion
+@@ -120,5 +121,5 @@ dependencies {
+         testImplementation project.ext.AsyncStorageLibs.testTruth
+     }
+ 
+-    implementation 'com.facebook.react:react-native:+' // from node_modules
++    compileOnly 'com.facebook.react:react-android:0.81.5'
+ }
+\ No newline at end of file
+diff --git a/node_modules/@react-native-async-storage/async-storage/android/config.gradle b/node_modules/@react-native-async-storage/async-storage/android/config.gradle
+index 33147eb..4d7ed5b 100644
+--- a/node_modules/@react-native-async-storage/async-storage/android/config.gradle
++++ b/node_modules/@react-native-async-storage/async-storage/android/config.gradle
+@@ -96,7 +96,9 @@ long getDatabaseSize() {
+ }
+ 
+ def safeExtGet(prop, fallback) {
+-    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
++    def v = rootProject.findProperty(prop)
++    if (v != null) return v.toString()
++    return rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+ }
+ 
+ def getFlagOrDefault(flagName, defaultValue) {

@@ -1,0 +1,30 @@
+---
+description: Mantenere l'app funzionante e prevedere dinamiche che causano malfunzionamenti
+alwaysApply: true
+---
+
+# Manutenzione e prevenzione malfunzionamenti OXY Real
+
+L’utente non è esperto di codice; l’assistente è l’esperto e deve **metterlo in condizione di avere un’app funzionante** e **prevedere** le dinamiche che porterebbero al malfunzionamento.
+
+## Obblighi
+
+- **Leggere** `docs/MANUTENZIONE_E_RISCHI.md` prima di modifiche che toccano: primo avvio, lingua, login/registrazione, chat, backend, diario, Memory Vault, billing, build.
+- **Non** alterare senza necessità:
+  - Logica di `HAS_CHOSEN_LANGUAGE_AT_STARTUP` (lingua solo una volta al primo avvio).
+  - Flusso `isLogged` / Auth / persistenza utente (utente registrato senza logout → chat diretta).
+  - Chiamate e integrazione diario e memoria con il backend (Oxy deve “leggere” diario e note).
+  - Gestione offline/rete e limiti messaggi (MAX_MESSAGE_LENGTH, timeout).
+- **Verificare** dopo modifiche rilevanti: avvio app, scelta lingua (solo primo avvio), login, chat, almeno una funzione sensibile (menu, Memory Vault, Diario).
+- **Documentare** brevemente dove si è toccato codice sensibile quando può impattare il prodotto.
+
+## Flusso app
+
+- Seguire **`docs/FLUSSO_APP.md`** per ordine dei passi (lingua → iscrizione → Trial/Abbonamento/Lifetime → pagamento → chat) e conseguenze di ogni azione.
+- Per scelte di prodotto sul flusso (es. “dopo login mostriamo anche la scelta piano?”), **chiedere al proprietario** invece di decidere in autonomia.
+
+## Riferimenti
+
+- Rilascio e build: `GO_LIVE.md`, `BUILD_APK_DOPO_FIX_CRASH.md`.
+- Dettaglio rischi e ruoli: `docs/MANUTENZIONE_E_RISCHI.md`.
+- Flusso utente: `docs/FLUSSO_APP.md`.

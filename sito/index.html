@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>OXY Real – Real Identity</title>
+  <meta name="description" content="OXY Real sta arrivando. Real Identity, memoria e AI pensata per chi vuole qualcosa di più profondo di una semplice chat.">
+  <meta name="keywords" content="OXY Real, Oxy, Real Identity, AI, app, coming soon">
+  <meta property="og:title" content="OXY Real – Real Identity">
+  <meta property="og:description" content="Countdown al lancio di OXY Real. Iscriviti per ricevere il link al sito e all'app quando saranno online.">
+  <meta property="og:type" content="website">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@200;300;400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    :root {
+      --accent-gold: #c5a059;
+      --accent-bright: #f1d3a1;
+      --text-light: #e0e0e0;
+      --bg-dark: #0a0a0a;
+      --navy: #002b4d;
+      --transition: all 0.4s ease;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      /* prevale il blu OXY, con il nero solo a chiudere il fondo */
+      background: radial-gradient(ellipse at top, #003b6e 0%, #002b4d 45%, #041019 85%);
+      color: var(--text-light);
+      font-family: 'Montserrat', sans-serif;
+      /* niente scroll globale su desktop, ma verrà sbloccato su mobile */
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 960px;
+      height: calc(100vh - 32px); /* riempie la pagina, senza riquadro interno che scrolla su desktop */
+      border-radius: 24px;
+      border: 1px solid rgba(197,160,89,0.45);
+      /* card più blu, meno nero pieno */
+      background: radial-gradient(circle at top, rgba(0,59,110,0.85) 0%, rgba(0,27,61,0.96) 50%, rgba(4,16,25,0.98) 100%);
+      padding: 24px 18px 22px;
+      box-shadow: 0 26px 80px rgba(0,0,0,0.9);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow: hidden; /* nessuno scroll interno su desktop */
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .brand-title {
+      font-family: 'Cinzel', serif;
+      font-size: 48px;
+      letter-spacing: 6px;
+      color: var(--accent-gold);
+      font-weight: 700;
+      text-transform: none; /* forza OXY Real senza tutto maiuscolo */
+      animation: heartbeat 1.8s infinite ease-in-out;
+      text-shadow: 0 0 28px rgba(197,160,89,0.55);
+    }
+
+    .brand-title span {
+      font-style: italic;
+      text-transform: none;
+      font-weight: 400;
+    }
+
+    @keyframes heartbeat {
+      0% { transform: scale(1); }
+      14% { transform: scale(1.06); }
+      28% { transform: scale(1); }
+      42% { transform: scale(1.08); }
+      70% { transform: scale(1); }
+    }
+
+    .brand-sub {
+      font-family: 'Cinzel', serif;
+      font-style: italic;
+      font-size: 13px;
+      text-transform: lowercase;
+      letter-spacing: 2px;
+      color: rgba(241,211,161,0.9);
+    }
+
+    .badge-coming {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(197,160,89,0.6);
+      background: rgba(0,0,0,0.55);
+      color: rgba(250,250,250,0.85);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 32px;
+      align-items: center;
+    }
+
+    .left {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .headline {
+      font-size: clamp(20px, 2.4vw, 26px);
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .headline span {
+      color: var(--accent-gold);
+      font-style: italic;
+      font-weight: 500;
+    }
+
+    .subline {
+      font-size: 14px;
+      color: #d1d1d1;
+      max-width: 40ch;
+      line-height: 1.7;
+    }
+
+    .countdown {
+      display: flex;
+      gap: 14px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+
+    .countdown-item {
+      min-width: 70px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.7);
+      border: 1px solid rgba(197,160,89,0.4);
+      text-align: center;
+    }
+
+    .countdown-value {
+      font-size: 30px;
+      font-weight: 700;
+      color: var(--accent-bright);
+      letter-spacing: 2px;
+      text-shadow: 0 0 16px rgba(0,0,0,0.8);
+    }
+
+    .countdown-label {
+      margin-top: 4px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #999;
+    }
+
+    .right {
+      background: radial-gradient(circle at top, rgba(197,160,89,0.15), rgba(0,0,0,0.95));
+      border-radius: 18px;
+      border: 1px solid rgba(197,160,89,0.5);
+      padding: 18px 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .right-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent-gold);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    .right-sub {
+      font-size: 12px;
+      color: #d1d1d1;
+    }
+
+    .form-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    label {
+      font-size: 12px;
+      color: #d1d1d1;
+    }
+
+    input[type="text"],
+    input[type="email"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+
+    input::placeholder {
+      color: #777;
+    }
+
+    .btn-primary {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: none;
+      background: var(--accent-gold);
+      color: #0a0a0a;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-bright);
+      transform: translateY(-1px);
+    }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0 4px;
+    }
+
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background: rgba(255,255,255,0.15);
+    }
+
+    .divider-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #8a8a8a;
+    }
+
+    .providers {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .provider-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.6);
+      color: #f5f5f5;
+      font-size: 12px;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .provider-btn i {
+      font-size: 14px;
+    }
+
+    .provider-btn:hover {
+      border-color: var(--accent-gold);
+      color: var(--accent-bright);
+      transform: translateY(-1px);
+    }
+
+    .form-note {
+      margin-top: 4px;
+      font-size: 10px;
+      color: #8f8f8f;
+      line-height: 1.5;
+    }
+
+    .success {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--accent-bright);
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 12px;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .footer a {
+      color: var(--accent-gold);
+      text-decoration: none;
+    }
+
+    @media (max-width: 768px) {
+      /* Su mobile: scroll abilitato, contenuto dall'alto, card centrata orizzontalmente */
+      html, body {
+        height: auto;
+        min-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+
+      body {
+        align-items: flex-start;
+        justify-content: center;
+      }
+
+      .page {
+        padding: 22px 16px 18px;
+        border-radius: 18px;
+        height: auto;
+        min-height: calc(100vh - 32px);
+        overflow: visible;
+      }
+
+      .brand-title {
+        font-size: clamp(28px, 8vw, 48px);
+        letter-spacing: 2px;
+      }
+
+      .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .content {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .right {
+        order: -1;
+      }
+      .footer {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <div class="brand">
+        <div class="brand-title">OXY <span>Real</span></div>
+        <div class="brand-sub">real identity</div>
+      </div>
+      <div class="badge-coming">Lancio · 9 Aprile 2026</div>
+    </header>
+
+    <section class="content">
+      <div class="left">
+        <div>
+          <p class="headline">
+            Non un’altra AI qualsiasi.<br>
+            <span>La tua storia, finalmente ricordata.</span>
+          </p>
+          <p class="subline">
+            OXY Real è pensata per chi non vuole solo risposte, ma un punto fisso nella propria vita digitale: una memoria che ti segue, ti riconosce e ti parla come chi ti conosce davvero.
+          </p>
+        </div>
+
+        <div>
+          <p style="font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: #aaaaaa; margin-bottom: 6px;">
+            Countdown al primo rilascio
+          </p>
+          <div class="countdown" id="countdown">
+            <div class="countdown-item">
+              <div class="countdown-value" id="cd-days">00</div>
+              <div class="countdown-label">Giorni</div>
+            </div>
+            <div class="countdown-item">
+              <div class="countdown-value" id="cd-hours">00</div>
+              <div class="countdown-label">Ore</div>
+            </div>
+            <div class="countdown-item">
+              <div class="countdown-value" id="cd-minutes">00</div>
+              <div class="countdown-label">Minuti</div>
+            </div>
+            <div class="countdown-item">
+              <div class="countdown-value" id="cd-seconds">00</div>
+              <div class="countdown-label">Secondi</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="right">
+        <div>
+          <p class="right-title">Iscriviti per il link al lancio</p>
+          <p class="right-sub">
+            Lascia i tuoi dati per ricevere il link diretto al sito e all'app nel momento in cui saranno online. OXY Real nasce come prodotto premium: al lancio riceverai anche i dettagli sulle opzioni a pagamento.
+          </p>
+        </div>
+
+        <form id="notify-form" class="form-row">
+          <div>
+            <label for="name">Nome e cognome</label>
+            <input type="text" id="name" name="name" placeholder="Come vuoi che Oxy ti chiami?" required>
+          </div>
+          <div>
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" placeholder="La tua email principale" required>
+          </div>
+          <div style="margin-top: 4px;">
+            <label style="display:flex; align-items:flex-start; gap:8px; font-size:11px; color:#d1d1d1; cursor:pointer;">
+              <input type="checkbox" id="consent" style="margin-top:2px;">
+              <span>
+                Dichiaro di avere almeno 18 anni e acconsento al trattamento dei dati per ricevere aggiornamenti su OXY Real secondo la
+                <a href="#" id="privacy-link" style="color:var(--accent-gold); text-decoration:none;">Privacy Policy</a>.
+              </span>
+            </label>
+          </div>
+          <button type="submit" class="btn-primary">Registrati per il lancio</button>
+          <div id="success-msg" class="success" style="display:none;">
+            Ricevuto. Ti avviseremo appena OXY Real sarà online. Nella mail di conferma troverai i dettagli dei piani premium e dell'accesso prioritario al lancio.
+          </div>
+        </form>
+
+      </aside>
+    </section>
+
+    <footer class="footer">
+      <span>© 2026 OXY Real · SecondSelf</span>
+      <span>
+        Contatto:
+        <a href="mailto:info@oxyreal.it" style="color:var(--accent-gold); text-decoration:none;">info@oxyreal.it</a>
+        ·
+        <a href="#" id="footer-privacy-link">Privacy Policy</a> ·
+        <a href="#" id="footer-cookie-link">Cookie Policy</a>
+      </span>
+    </footer>
+  </div>
+
+  <!-- Modal Privacy Policy sintetica -->
+  <div id="privacy-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div style="max-width:640px; width:100%; background:#05070b; border-radius:16px; border:1px solid rgba(197,160,89,0.6); padding:20px 18px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 style="margin:0; font-size:16px; color:var(--accent-gold); font-family:'Cinzel',serif; letter-spacing:1px;">Privacy Policy – OXY Real (sintesi)</h2>
+        <button id="privacy-close" style="border:none; background:transparent; color:#d1d1d1; font-size:18px; cursor:pointer;">×</button>
+      </div>
+      <div style="font-size:13px; color:#d1d1d1; line-height:1.6; max-height:60vh; overflow-y:auto;">
+        <p><strong>Titolare:</strong> SecondSelf. Utilizziamo il tuo nome e la tua email solo per gestire la lista di attesa e inviarti comunicazioni sul lancio di OXY Real.</p>
+        <p><strong>Base giuridica:</strong> il tuo consenso espresso tramite la checkbox sopra il pulsante di registrazione.</p>
+        <p><strong>Finalità:</strong> informarti sul lancio di OXY Real, eventuali aggiornamenti importanti e inviare, se lo desideri, notizie rilevanti sul progetto.</p>
+        <p><strong>Dati trattati:</strong> nome, cognome, indirizzo email, data/ora di iscrizione.</p>
+        <p><strong>Durata:</strong> conserveremo i dati finché resterai iscritto alla lista di attesa o finché non chiederai la cancellazione.</p>
+        <p><strong>Diritti:</strong> puoi chiedere in qualsiasi momento accesso, rettifica o cancellazione dei tuoi dati. In ogni email inseriremo un link per disiscriverti automaticamente dalla lista; in alternativa puoi scriverci all’indirizzo di contatto indicato nel footer delle comunicazioni.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Cookie Policy sintetica -->
+  <div id="cookie-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div style="max-width:520px; width:100%; background:#05070b; border-radius:16px; border:1px solid rgba(197,160,89,0.6); padding:20px 18px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 style="margin:0; font-size:16px; color:var(--accent-gold); font-family:'Cinzel',serif; letter-spacing:1px;">Cookie Policy – OXY Real (sintesi)</h2>
+        <button id="cookie-close" style="border:none; background:transparent; color:#d1d1d1; font-size:18px; cursor:pointer;">×</button>
+      </div>
+      <div style="font-size:13px; color:#d1d1d1; line-height:1.6; max-height:60vh; overflow-y:auto;">
+        <p>Su questa pagina di anteprima utilizziamo solo i cookie tecnici essenziali necessari al funzionamento del sito (ad esempio per garantire il corretto caricamento delle risorse).</p>
+        <p>Non utilizziamo cookie di profilazione o tracciamento marketing in questa fase di lancio.</p>
+        <p>Se in futuro verranno attivati strumenti di analisi o tracciamento, la Cookie Policy sarà aggiornata e verrà mostrato il relativo banner di consenso.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Countdown — modifica questa data quando decidi il go-live
+    const launchDate = new Date('2026-04-09T18:00:00+01:00').getTime();
+
+    function updateCountdown() {
+      const now = Date.now();
+      const diff = launchDate - now;
+      const cdDays = document.getElementById('cd-days');
+      const cdHours = document.getElementById('cd-hours');
+      const cdMinutes = document.getElementById('cd-minutes');
+      const cdSeconds = document.getElementById('cd-seconds');
+
+      if (diff <= 0) {
+        cdDays.textContent = '00';
+        cdHours.textContent = '00';
+        cdMinutes.textContent = '00';
+        cdSeconds.textContent = '00';
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+
+      cdDays.textContent = String(days).padStart(2, '0');
+      cdHours.textContent = String(hours).padStart(2, '0');
+      cdMinutes.textContent = String(minutes).padStart(2, '0');
+      cdSeconds.textContent = String(seconds).padStart(2, '0');
+    }
+
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+
+    // Form iscrizione: invio al backend (Brevo chiamato lato server; API key solo in .env)
+    const NEWSLETTER_API = 'https://oxy-real-backend.onrender.com';
+    const form = document.getElementById('notify-form');
+    const successMsg = document.getElementById('success-msg');
+    const consentCheckbox = document.getElementById('consent');
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!consentCheckbox.checked) {
+        alert('Per procedere è necessario dichiarare di essere maggiorenne e accettare la Privacy Policy.');
+        return;
+      }
+
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+
+      try {
+        const url = (NEWSLETTER_API || '').replace(/\/$/, '') + '/api/landing/newsletter';
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email })
+        });
+
+        if (response.ok) {
+          successMsg.style.display = 'block';
+          form.reset();
+          consentCheckbox.checked = false;
+          setTimeout(() => { successMsg.style.display = 'none'; }, 6000);
+        } else {
+          alert('Qualcosa è andato storto. Riprova tra poco.');
+        }
+      } catch (err) {
+        alert('Errore di connessione. Riprova.');
+      }
+    });
+
+    // Apertura/chiusura modal Privacy
+    const privacyLink = document.getElementById('privacy-link');
+    const footerPrivacyLink = document.getElementById('footer-privacy-link');
+    const privacyModal = document.getElementById('privacy-modal');
+    const privacyClose = document.getElementById('privacy-close');
+
+    function openPrivacyModal(e) {
+      if (e) e.preventDefault();
+      privacyModal.style.display = 'flex';
+    }
+
+    privacyLink.addEventListener('click', openPrivacyModal);
+    footerPrivacyLink.addEventListener('click', openPrivacyModal);
+
+    privacyClose.addEventListener('click', function () {
+      privacyModal.style.display = 'none';
+    });
+
+    privacyModal.addEventListener('click', function (e) {
+      if (e.target === privacyModal) {
+        privacyModal.style.display = 'none';
+      }
+    });
+
+    // Gestione Cookie Policy (footer)
+    const footerCookieLink = document.getElementById('footer-cookie-link');
+    const cookieModal = document.getElementById('cookie-modal');
+    const cookieClose = document.getElementById('cookie-close');
+
+    footerCookieLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      cookieModal.style.display = 'flex';
+    });
+
+    cookieClose.addEventListener('click', function () {
+      cookieModal.style.display = 'none';
+    });
+
+    cookieModal.addEventListener('click', function (e) {
+      if (e.target === cookieModal) {
+        cookieModal.style.display = 'none';
+      }
+    });
+  </script>
+  <audio id="bg-music" src="musica.mp3" loop></audio>
+  <script>
+    document.addEventListener('click', function startMusic() {
+      var audio = document.getElementById('bg-music');
+      audio.volume = 0.3;
+      audio.play();
+      document.removeEventListener('click', startMusic);
+    }, { once: true });
+  </script>
+</body>
+</html>

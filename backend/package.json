@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "delete-user": "node scripts/delete-user-data.mjs"
   },
   "engines": {
     "node": ">=18"

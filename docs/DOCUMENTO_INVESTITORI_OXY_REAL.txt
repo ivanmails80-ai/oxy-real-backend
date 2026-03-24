@@ -1,0 +1,322 @@
+# OXY Real — Documento per Investitori
+
+**Versione:** 1.0  
+**Data:** Febbraio 2025  
+**Confidenziale**
+
+---
+
+## Sommario esecutivo
+
+**OXY Real** è un’applicazione mobile (iOS e Android) che mette al centro un **assistente IA personale** (“OXY”) con memoria a lungo termine, modalità di interazione evolute (testo, voce, immagini) e un modello di monetizzazione basato su **abbonamenti** e **acquisti una tantum (Lifetime)**. L’obiettivo è diventare il compagno IA di riferimento per produttività, crescita personale e intrattenimento, con una **visione di espansione verso una piattaforma TV interamente guidata dall’IA**, dove gli utenti interagiscono da casa con contenuti e giochi in tempo reale.
+
+Il presente documento descrive in modo esaustivo: (1) l’app e le sue funzionalità, (2) il modello di business e i piani tariffari, (3) la visione futura (TV AI interattiva), (4) costi, ricavi e proiezioni economiche.
+
+---
+
+# Parte I — L’applicazione OXY Real
+
+## 1. Cos’è OXY Real
+
+OXY Real è un’app nativa (React Native / Expo) che offre:
+
+- **Chat conversazionale** con un assistente IA (modelli OpenAI, incluso GPT-4o) che risponde in modo contestuale e personalizzato.
+- **Memoria persistente** (“Memory Vault”): l’IA ricorda obiettivi, preferenze e fatti chiave dell’utente tra le sessioni.
+- **Modalità di utilizzo multiple**: testo, **input vocale** (registrazione → trascrizione), **risposta vocale** (TTS), **analisi di immagini** (Vision AI) per contesto visivo.
+- **Esperienza guidata**: Power Badges (modalità ruolo: business, coach, creatività, ecc.), Diario, Storie a livelli, edizione “Student” per studio e pianificazione.
+- **Monetizzazione**: abbonamenti mensili (OXY Pass Starter / Pro / Elite) e licenze Lifetime (Starter / Pro / Elite), più pacchetti token per utenti con chiave propria.
+
+L’app è **multilingue**: sono supportate **sei lingue** — italiano (it), inglese (en), francese (fr), spagnolo (es), arabo (ar), cinese (zh) — per interfaccia utente, contenuti e risposte dell’assistente. Autenticazione **email/password**, **Google** e **Apple**. I dati di profilo e le preferenze sono gestiti in modo sicuro (Firebase Auth, Firestore, backend dedicato per proxy chat e fatturazione).
+
+---
+
+## 2. Funzionalità in dettaglio (specifiche tecniche)
+
+### 2.1 Chat con OXY (core)
+
+- **Modelli IA**: tier **entry** (Starter, es. GPT-4o mini), **pro** (Pro: GPT-4o, GPT-4.1, GPT-5 mini), **elite** (Elite: tutti i modelli inclusi serie o / GPT-5 pieno). Configurabili lato backend.
+- **Limite messaggi giornalieri** (solo piani abbonamento): **50** (Starter), **150** (Pro), **400** (Elite). Valori definiti in `pricingConfig` e sovrascrivibili dal backend via variabili d’ambiente (`DAILY_LIMIT_STARTER`, `DAILY_LIMIT_PRO`, `DAILY_LIMIT_ELITE`). Gli utenti **Lifetime** non hanno limite giornaliero (costi API a carico dell’utente tramite Oxy Key).
+- **Cronologia persistente**: conversazioni salvate e recuperabili tramite backend; l’utente può riprendere sessioni precedenti.
+- **Limite lunghezza messaggio**: 1.500 caratteri (modalità subscription) o 8.000 (modalità one-time purchase con Oxy Key), per contenere costi e favorire messaggi compatti.
+- **Rate limiting**: in caso di superamento del limite giornaliero viene restituito errore 429 con messaggio dedicato (“Daily High-Priority Credits” esauriti) e CTA per upgrade di piano.
+
+### 2.2 Memory Vault (memoria a lungo termine)
+
+- **Struttura dati** (salvata e sincronizzata con backend): **Obiettivi** (goals), **Fatti chiave** (keyFacts), **Identità/riepilogo** (identitySummary), **Ultimo contesto** (lastContext). L’utente può aggiungere note libere; le note sono organizzate per sezione e cancellabili singolarmente.
+- **Livelli per piano**: **base** (Starter), **extended** (Pro), **max** (Elite). La differenza tra livelli può riguardare capienza e priorità d’uso nel contesto inviato al modello.
+- **Integrazione in chat**: il contesto Memory Vault viene iniettato nelle richieste all’IA; tutti i **Power Badges** includono nel prompt l’istruzione esplicita di usare obiettivi e fatti salvati per personalizzare risposte e tono.
+
+### 2.3 Power Badges (modalità ruolo)
+
+Sono **modalità preimpostate** che cambiano il tono e il ruolo dell’IA. Elenco completo (da `powerBadges.js`): Social Titan, Genius Mode, Business Shark, Legal Armor, Ghost Writer, Diplomatic Blade, Gourmet Vision, Supporto Emotivo, Routine Coach, Proattivo, Ottimista, Analitica, Minimalista, Coach, Celebrazione, Launch Commander, Planner. Ogni badge applica un prompt di sistema dedicato (tono, obiettivi, uso esplicito della Memory Vault) e ha icone/colori in UI; disponibilità per piano: subset su Starter, set completo su Pro/Elite. Esempi:
+
+| Badge | Ruolo | Uso tipico |
+|-------|--------|------------|
+| **Business Shark** | Investitore VC, analitico, ROI | Pitch, unit economics, rischi |
+| **Genius Mode** | Ingegnere capo, tecnico | Analisi problemi, soluzioni strutturate |
+| **Ghost Writer** | Ghost writer | Riscrevere testi in modo persuasivo |
+| **Gourmet Vision** | Chef stellato | Ricette da ingredienti o foto frigo (Vision AI) |
+| **Routine Coach** | Coach abitudini | Routine giornaliere da obiettivi e memoria |
+| **Supporto Emotivo** | Amico che dice la verità | Sostegno emotivo senza fronzoli |
+| **Planner** | Assistente pianificazione | Giornata, impegni, task organizzati |
+| **Launch Commander** | Marketing/Growth | Posizionamento, copy, pricing, test |
+| **Social Titan** | Contenuti virali | Post che trainano engagement |
+| **Analitica** | Professionale, dati | Pro/contro, numeri, passi chiari |
+| **Diplomatic Blade** | Comunicazione strategica | Risposte a figure autoritarie (avvocato, capo, ecc.) |
+| **Coach**, **Celebrazione**, **Ottimista**, **Minimalista**, **Proattivo** | Vari | Coaching, celebrazione progressi, tono essenziale, suggerimenti proattivi |
+
+I Power Badges sono integrati con la Memory Vault e con le risposte vocali (TTS) quando abilitate.
+
+### 2.4 Input vocale e risposta vocale (TTS)
+
+- **Input vocale**: l’utente registra un messaggio; l’audio viene inviato al backend per **trascrizione** (Whisper) e il testo viene usato come messaggio in chat.
+- **Risposta vocale (TTS)**: le risposte di OXY possono essere lette ad alta voce con **voci OpenAI** (es. Shimmer, Nova, Alloy, Onyx, Echo, Cedar), con personalità e tono distinti (Executive, Brilliant, Harmony, Deep, Strategist, Kind Partner).
+- **Per piano**: Starter **basic** (subset voci), Pro **all** (tutte le voci), Elite **all_premium** (tutte incluso eventuali voci premium). Lifetime ereditano il tier del piano acquistato.
+
+### 2.5 Vision AI (analisi immagini)
+
+- L’utente può allegare **foto** (camera o galleria) al messaggio; l’IA riceve l’immagine e risponde in modo contestuale (es. ricette da foto frigo, analisi documenti, descrizioni).
+- Abilitata da **Pro** in su (e relativi Lifetime).
+
+### 2.6 Diario
+
+- **Diario personale** integrato: l’utente può scrivere note e riflessioni; i contenuti sono salvati e possono essere referenziati dall’IA per coerenza con obiettivi e contesto.
+- Presente su tutti i piani (Starter, Pro, Elite e Lifetime).
+
+### 2.7 Storie a livelli
+
+- **Storie interattive** a step (es. “Primo passo”, “Tre giorni”) che guidano l’utente in percorsi brevi e coinvolgenti.
+- Contenuti traducibili (i18n) in tutte le lingue dell’app (italiano, inglese, francese, spagnolo, arabo, cinese); attive su tutti i piani.
+
+### 2.8 Student Edition (profilo studio)
+
+- Percorso dedicato per **studenti**: scelta tra contesto “Studio” e “Vita & Lavoro”, livello (liceo / università), focus, nome esame, data esame.
+- **Promemoria locali** (notifiche) per sessioni di studio e scadenze.
+- Integrazione con la chat: OXY può adattare tono e contenuti al profilo studio (pianificazione, ripassi, motivazione).
+
+### 2.9 Notifiche e promemoria
+
+- **Notifiche push** (Expo Notifications) per promemoria creati dall’utente (appuntamenti, promemoria da chat).
+- **Canale Android** dedicato e richiesta permessi con messaggi chiari (UX e compliance).
+
+### 2.10 Abbonamento e pagamenti (in-app)
+
+- **Menu Impostazioni**: sezione Abbonamento e pagamenti con piani, prezzi e link a Stripe (o store).
+- **Piani abbonamento**: Starter, Pro, Elite (mensili e annuali con sconto ~20%); limiti giornalieri 50 / 150 / 400 messaggi.
+- **Lifetime** (acquisto una tantum; costi API a carico utente tramite Oxy Key): **Starter 99 €**, **Pro 249 €**, **Elite 499 €**. Upgrade da un piano Lifetime a superiore: pagamento della **differenza** (es. da Starter a Pro +150 €).
+- **Pacchetti token** (per utenti con Oxy Key): **100k token → 5 €**, **500k token → 20 €** (valori da `pricingConfig`).
+- **Upgrade tra piani abbonamento**: differenza proporzionata ai giorni rimanenti del periodo corrente.
+
+### 2.11 Sicurezza e conformità
+
+- Chiavi API (OpenAI, Tavily, ecc.) **solo sul backend** in modalità subscription; nessuna chiave Master nell’app in produzione.
+- **Firebase Auth** + **Firestore** per profilo utente; backend con verifica token e (in roadmap) verifica abbonamento via webhook Stripe.
+- **ErrorBoundary** e gestione offline (banner “Sei offline”) per robustezza e UX.
+- Contenuti legali: Privacy policy, Termini di servizio, Abbonamento (placeholder sostituibili con testi definitivi pre-lancio).
+
+### 2.12 Roadmap funzionale (feature flag)
+
+- **Già in app**: Diary, Stories, Voice Input, Image Context (Vision), Reputation, A/B tests.
+- **In roadmap**: Community, Group Chat (feature flag presenti ma disabilitati fino a rilascio).
+
+### 2.13 Lingue supportate (i18n)
+
+L’app non è solo in italiano e inglese: le **lingue disponibili** sono **sei**: Italiano (it), English (en), Français (fr), Español (es), العربية (ar), 中文 (zh). L’utente sceglie la lingua al primo avvio o da Menu → Account e sicurezza → Lingua. UI, messaggi di sistema, Storie e contenuti guidati sono tradotti in tutte e sei le lingue; l’assistente IA risponde nella lingua selezionata.
+
+---
+
+# Parte II — Modello di business e prezzi
+
+## 3. Piani e prezzi (configurazione attuale)
+
+### 3.1 Abbonamenti mensili (OXY Pass)
+
+| Piano | Prezzo mensile (indicativo) | Limite msg/giorno | Modelli | Memory Vault | Vision | Voci TTS | Community |
+|------|-----------------------------|--------------------|---------|--------------|--------|----------|-----------|
+| **Starter** | 9,90 € | 50 | entry (es. GPT-4o mini) | base | no | basic | no |
+| **Pro** | 24,90 € | 150 | pro (GPT-4o, ecc.) | extended | sì | tutte | sì |
+| **Elite** | 59,00 € | 400 | elite (massime capacità) | max | sì | premium | sì |
+
+- **Annuali**: stessi piani con sconto circa 20% (es. 2 mesi gratis).
+- **Chiave OXY inclusa** negli abbonamenti: i costi di utilizzo API sono a carico della piattaforma.
+
+### 3.2 Lifetime (acquisto una tantum)
+
+| Piano | Prezzo (indicativo) | Note |
+|-------|---------------------|------|
+| **Lifetime Starter** | 99 € | Funzionalità Starter; l’utente usa la propria Oxy Key (costi API a suo carico). |
+| **Lifetime Pro** | 249 € | Funzionalità Pro. |
+| **Lifetime Elite** | 499 € | Funzionalità Elite. |
+
+- Upgrade tra Lifetime: pagamento della sola **differenza** rispetto al listino (es. da Starter 99 € a Pro 249 € → 150 €).
+
+### 3.3 Pacchetti token (per utenti con Oxy Key)
+
+- **100k token**: 5 €  
+- **500k token**: 20 €  
+
+Utilizzati quando l’utente ha una chiave propria (Lifetime o modalità one-time) e necessita di credito aggiuntivo.
+
+---
+
+## Confronto con i competitor
+
+### App (assistenti IA personali / companion)
+
+| Aspetto | OXY Real | ChatGPT (app) | Replika / Pi (Inflection) / Character.AI | Note |
+|--------|----------|----------------|------------------------------------------|------|
+| **Memoria a lungo termine** | Sì (Memory Vault: obiettivi, fatti, identità, contesto) | Limitata o assente (sessioni lunghe ma non “cassaforte” persistente) | Replika: memoria relazione; altri: focus su conversazione, meno su memoria strutturata | OXY punta su produttività e crescita personale ancorata a obiettivi salvati |
+| **Modalità ruolo / persona** | Power Badges (Business Shark, Genius Mode, Coach, ecc.) | Nessun “persona” predefinito; utente può impostare istruzioni | Replika: companion emotivo; Character.AI: personaggi; Pi: “personale” ma non badge tematici | OXY offre ruoli pronti per lavoro, studio, creatività, supporto emotivo |
+| **Voce (TTS) e input vocale** | Sì (Whisper + voci OpenAI, tier per piano) | Sì (voice mode) | Replika/Pi: voce presente | Parità o differenziazione su qualità e integrazione con Memory Vault |
+| **Vision (immagini)** | Sì da Pro (analisi foto in chat) | Sì | Limitata o assente in molti competitor | OXY la include in piano Pro/Elite |
+| **Prezzi** | Abbonamento (Starter/Pro/Elite) + Lifetime (99 / 249 / 499 €) + token | Plus/Team/Enterprise; no Lifetime | Replika: freemium + sub; Pi: gratuito; Character.AI: freemium | OXY propone anche acquisto una tantum (Lifetime) oltre all’abbonamento |
+
+**Posizionamento OXY**: assistente IA con **memoria persistente** e **modalità ruolo** (Power Badges) per produttività, crescita personale e intrattenimento, con opzione Lifetime e integrazione voce/immagine.
+
+### TV interamente AI (giochi, show, interazione in tempo reale)
+
+**Al momento non esiste un modello consolidato di “TV interamente AI”** sul mercato: né un canale né una piattaforma dove il contenuto principale (giochi, show, intrattenimento) sia generato o condotto dall’IA in tempo reale con interazione massiva da casa (quiz, choose-your-own-adventure, talk show con IA conduttore). Eventuali esperimenti o beta (es. format pilota, proof-of-concept) sono assenti o nascenti e non costituiscono ancora un’offerta commerciale stabile. Questa assenza rappresenta un’**opportunità first-mover** per OXY: la visione TV (Parte III) si colloca in uno spazio non ancora occupato da competitor affermati.
+
+---
+
+# Parte III — Visione futura: TV interamente AI
+
+## 4. Concetto: TV che interagisce con gli utenti
+
+L’evoluzione strategica prevede una **piattaforma TV (o connected TV / smart TV)** dove:
+
+- **Il contenuto principale è generato o orchestrato dall’IA** in tempo reale.
+- **Gli utenti a casa** non sono solo spettatori: **interagiscono** con l’IA tramite telecomando, voce o secondo schermo (smartphone/tablet).
+- **Esempi d’uso**:
+  - **Giochi**: non ci sono “giocatori in studio”; sono i **telespettatori** a giocare contro o insieme all’IA. L’IA conduce il gioco, legge le risposte/azioni degli utenti (quiz, sfide, avventure narrative) e adatta difficoltà, storie e premi. Leaderboard e premi possibili senza costi per l’utente (modello free-to-view).
+  - **Show interattivi**: talk show o format dove l’IA è conduttore/ospite e il pubblico da casa invia domande o voti; l’IA risponde in diretta e personalizza segmenti.
+  - **Educazione e coaching**: lezioni o sessioni di coaching in cui l’IA risponde alle domande vocali o testuali degli utenti sul TV.
+  - **Intrattenimento narrativo**: storie in cui il pubblico sceglie il percorso (choose-your-own-adventure) e l’IA genera o adatta la trama in tempo reale.
+
+Questa visione **estende il brand OXY** dal “compagno IA in tasca” al “compagno IA nel salotto”. **Modello di ricavo TV: esclusivamente sponsorizzazioni (TV commerciale)**. La piattaforma TV è **gratuita per gli utenti**: nessun abbonamento B2C, nessun pass a pagamento o micro-transazioni. I ricavi derivano **solo da sponsor** (brand che sponsorizzano show/giochi, spot, naming, partnership) e, in B2B, da licenze a broadcaster o operatori che trasmettono il canale sponsorizzato.
+
+---
+
+## 5. Requisiti tecnici e di prodotto (TV AI)
+
+- **Low-latency**: risposta dell’IA in tempo reale (inferenza ottimizzata, modelli edge o cloud dedicati).
+- **Scalabilità**: migliaia o milioni di sessioni concorrenti (architettura event-driven, CDN, orchestrazione giochi/show).
+- **Interfaccia TV**: UI adatta a telecomando e grande schermo; opzionale second screen (app OXY Real già esistente) per input complessi.
+- **Voce e TTS**: riconoscimento vocale e sintesi vocale di alta qualità per interazione hands-free da divano.
+- **Modelli di licenza/ricavo**: B2B (licenze a broadcaster/operatori per canale o format) e **ricavi da sponsor** (pacchetti sponsor per show/giochi, CPM/CPP, naming rights). **Nessun abbonamento utente (B2C)** per la TV: la fruizione è gratuita.
+
+---
+
+# Parte IV — Costi, ricavi e proiezioni
+
+## 6. Struttura costi (piattaforma attuale: app OXY Real)
+
+### 6.1 Costi fissi / ricorrenti (mensili, ordine di grandezza)
+
+| Voce | Descrizione | Stima (€/mese) |
+|------|-------------|-----------------|
+| **Backend** | Hosting (es. Render, VPS), database, storage | 50 – 200 |
+| **Firebase** | Auth, Firestore, eventuale Cloud Functions | 25 – 100 |
+| **Stripe** | Commissioni fisse + % su transazioni | variabile |
+| **EAS / build** | Build Expo, submit store | 0 – 50 (piano free/paid) |
+| **Domini / SSL / email** | Domini, servizi email transazionali | 10 – 30 |
+| **Supporto / legale / contabilità** | Outsourcing o interno | 100 – 500 |
+
+**Totale indicativo costi fissi:** da circa **200 €/mese** (bootstrap) a **900 €/mese** (con supporto e legale).
+
+### 6.2 Costi variabili (per utente attivo)
+
+| Voce | Descrizione | Stima per utente/mese |
+|------|-------------|------------------------|
+| **API LLM (OpenAI)** | Chat, TTS, Whisper, Vision | 2 – 15 € (dipende da piano e utilizzo) |
+| **Backend / banda** | CPU, memoria, traffico | 0,10 – 0,50 € |
+| **Firebase** | Letture/scritture Firestore, Auth | 0,05 – 0,20 € |
+
+- **Starter**: costo medio API stimato **2 – 5 €/utente/mese**.  
+- **Pro**: **5 – 10 €/utente/mese**.  
+- **Elite**: **10 – 20 €/utente/mese**.
+
+I piani **Lifetime** non generano costi API a carico della piattaforma (l’utente usa la propria Oxy Key), quindi il **costo variabile per utente Lifetime è prossimo allo zero** dopo l’acquisto.
+
+### 6.3 Margini lordi per piano (indicativi)
+
+- **Starter** (9,90 €/mese): costo variabile ~3 € → **margine lordo ~7 €/utente/mese** (~70%).  
+- **Pro** (24,90 €/mese): costo ~7 € → **~18 €/utente/mese** (~72%).  
+- **Elite** (59 €/mese): costo ~15 € → **~44 €/utente/mese** (~75%).  
+- **Lifetime**: ricavo una tantum (99 / 249 / 499 €); costo variabile trascurabile → **margine lordo molto alto**; il rischio è il cannibalizzazione di abbonamenti ricorrenti.
+
+---
+
+## 7. Ricavi
+
+### 7.1 Fonti di ricavo (app)
+
+1. **Abbonamenti mensili/annuali** (Starter, Pro, Elite): ricavo ricorrente (MRR).  
+2. **Lifetime**: ricavo una tantum; possibile riconoscimento in contabilità su periodo (es. 24 mesi).  
+3. **Pacchetti token**: ricavo aggiuntivo per utenti con Oxy Key (margine dopo costo API e Stripe).  
+4. **Store**: eventuale **commissione Apple/Google** sul prezzo (15–30%) se l’acquisto passa da IAP; se si usa solo Stripe (web o link esterno), le commissioni store non si applicano ai pagamenti diretti (conformità da verificare per ogni store).
+
+### 7.2 Proiezioni semplificate (scenario conservativo)
+
+- **Anno 1**: 500 utenti paganti (mix 70% abbonamenti, 30% Lifetime).  
+  - Abbonamenti: 350 × 15 € medio ≈ **5.250 €/mese** → **63.000 €/anno**.  
+  - Lifetime: 150 × 250 € medio ≈ **37.500 €** una tantum.  
+  - **Ricavi totali anno 1**: ~**100.000 €** (ordine di grandezza).  
+
+- **Costi anno 1**: fissi ~6.000 € + variabili ~25.000 € (stima) → **~31.000 €**.  
+- **Margine lordo anno 1**: ~**69.000 €** (prima di tasse, stipendi full-time, marketing aggressivo).
+
+Questi numeri sono **puramente indicativi** e dipendono da: prezzo effettivo, mix piani, churn, costo reale API, scelta IAP vs Stripe.
+
+### 7.3 TV AI: costi e ricavi (visione)
+
+**Costi (ordine di grandezza)**
+
+| Fase | Voce | Stima |
+|------|------|--------|
+| **MVP (12 mesi)** | Infrastruttura real-time (streaming, API IA, eventi), CDN | 80.000 – 150.000 € |
+| | Licenze contenuti / musica / format | 20.000 – 50.000 € |
+| | Team prodotto + tech (2–3 FTE) | 120.000 – 200.000 € |
+| | Marketing e partnership broadcaster | 30.000 – 80.000 € |
+| **Totale MVP** | | **250.000 – 480.000 €** |
+| **Scalabilità** | Per 100k utenti TV concorrenti: inferenza IA, banda, storage | 50.000 – 150.000 €/anno |
+
+**Ricavi potenziali (solo sponsor e B2B; nessun abbonamento utente)**
+
+| Canale | Modello | Esempio |
+|--------|---------|--------|
+| **Sponsor** | Brand che sponsorizzano show, giochi o segmenti | Pacchetti per show/game (es. 50k–200k €/stagione), naming rights, segmenti "presented by" |
+| **Sponsor** | Spot e inserzioni (TV commerciale) | CPM/CPP 5–25 €; ricavo da milioni di impression e ascolti |
+| **B2B** | Licenza a broadcaster / operatore TV | 100.000 – 500.000 €/anno per format o canale dedicato (canale sponsorizzato) |
+| **Partnership** | Co-branding, eventi live sponsorizzati | Ricavi one-off o stagionali da brand per visibilità su giochi/show |
+
+**Esempio semplificato (anno 2–3 dalla launch TV)**  
+- 2–3 sponsor principali per show/giochi: 150.000 – 400.000 €/anno ciascuno → **300k – 1,2 M€/anno**.  
+- Spot e inserzioni (CPM su 2–5 M impression/mese): **200k – 600k €/anno**.  
+- 1 partnership B2B da 200.000 €/anno.  
+- Costi infrastruttura e contenuti ~800.000 €/anno → **margine lordo** (prima di stipendi e marketing) dipendente dal volume di ascolti e dagli accordi sponsor.  
+
+Il potenziale è **molto alto** se si raggiungono scale di ascolto (centinaia di migliaia di telespettatori) e accordi con sponsor e operatori; i costi iniziali richiedono un round di finanziamento dedicato alla piattaforma TV.
+
+---
+
+# Parte V — Riepilogo e next steps
+
+## 8. Punti di forza per l’investitore
+
+- **Prodotto differenziato**: memoria a lungo termine (Memory Vault), Power Badges e integrazione voce/immagine in un’unica app.  
+- **Monetizzazione chiara**: abbonamenti + Lifetime + token; margini lordi stimati 70–75% sugli abbonamenti.  
+- **Stack moderno e scalabile**: React Native, Firebase, backend Node, Stripe; roadmap tecnica definita (Community, Group Chat, verifica abbonamento server-side).  
+- **Visione di espansione**: TV interamente AI (giochi, show, education) con interazione utenti; ricavi da **solo sponsor e B2B** (TV commerciale gratuita per gli utenti), nessun abbonamento B2C.
+
+## 9. Prossimi passi operativi
+
+- Completare integrazione pagamenti (Stripe / IAP) e verifica abbonamento sul backend.  
+- Sostituire placeholder legali (Privacy, Termini, Abbonamento) con testi definitivi.  
+- Lancio su App Store e Google Play; marketing e acquisizione primi utenti paganti.  
+- Raccolta dati su LTV, CAC, churn per affinare unit economics e prezzi.  
+- In parallelo: studio di fattibilità e prototipo per piattaforma TV AI (giochi, format, partnership).
+
+---
+
+*Documento redatto per uso confidenziale in ambito di discussione con investitori. I numeri e le stime sono indicativi e potrebbero essere aggiornati in base a dati di mercato e contabilità.*

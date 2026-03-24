@@ -124,7 +124,7 @@ const generalLimiter = rateLimit({
 });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
-/** Modelli per tier: Free/Starter = mini, Pro = 4o, Elite = 4-turbo (o 4o). Fallback per Master/token pack. */
+/** Modelli per tier: Starter = mini, Pro = 4o, Elite = 4-turbo (o 4o). Fallback per Master/token pack. */
 const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
 const OPENAI_MODEL_PRO = (process.env.OPENAI_MODEL_PRO || 'gpt-4o').trim() || 'gpt-4o';
 const OPENAI_MODEL_ELITE = (process.env.OPENAI_MODEL_ELITE || 'gpt-4-turbo').trim() || 'gpt-4-turbo';
@@ -297,32 +297,22 @@ For any question about how the app works — features, memory, diary, stories, v
 — The OXY Real team`;
 }
 
-// Trial/Beta access (per go-live senza monetizzazione immediata)
-// - Se attivo, il backend può assegnare automaticamente uno stato "trialing" al primo /api/billing/status
-// - La chat è consentita (OPENAI_API_KEY lato server) entro un limite giornaliero
-// - Vision (immagini) è bloccata in trial per contenere i costi
-const BILLING_TRIAL_ENABLED = String(process.env.BILLING_TRIAL_ENABLED || '').trim() === 'true';
-const BILLING_TRIAL_DAYS = Math.max(1, Math.min(30, Number(process.env.BILLING_TRIAL_DAYS || 2)));
-const BILLING_TRIAL_PLAN_ID = (process.env.BILLING_TRIAL_PLAN_ID || 'sub_starter').trim();
-// Limiti per test veloce: se BILLING_QUICK_TEST_LIMITS=N (es. 5), trial e tutti i piani usano N messaggi/giorno.
+// Limiti per test veloce: se BILLING_QUICK_TEST_LIMITS=N (es. 5), tutti i piani usano N messaggi/giorno.
 const _quickTest = process.env.BILLING_QUICK_TEST_LIMITS != null && process.env.BILLING_QUICK_TEST_LIMITS !== ''
   ? Math.max(1, Math.min(100, Number(process.env.BILLING_QUICK_TEST_LIMITS)))
   : null;
-const BILLING_TRIAL_DAILY_LIMIT = _quickTest != null
-  ? _quickTest
-  : Math.max(1, Math.min(400, Number(process.env.BILLING_TRIAL_DAILY_LIMIT || 25)));
 
 // Limiti giornalieri per piano: da env (modificabili senza toccare codice), fallback valori di default
 const _dailyLimitStarter = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_STARTER || 50)));
 const _dailyLimitPro = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_PRO || 150)));
 const _dailyLimitElite = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_ELITE || 400)));
-const FREE_DAILY_LIMIT = Math.max(1, Math.min(50, Number(process.env.FREE_DAILY_LIMIT || 5)));
 const DAILY_LIMITS_BY_PLAN = {
   sub_starter: _dailyLimitStarter,
   sub_pro: _dailyLimitPro,
   sub_elite: _dailyLimitElite,
-  free: FREE_DAILY_LIMIT,
 };
+const OWNER_UNLIMITED_PLAN_ID = 'owner_unlimited';
+const OWNER_ACCESS_CODE = String(process.env.OWNER_ACCESS_CODE || '').trim();
 
 /** Normalizza planId per lookup limiti: sub_x_annual → sub_x (stesso limite del mensile). */
 function normalizePlanIdForLimits(planId) {
@@ -334,9 +324,10 @@ function normalizePlanIdForLimits(planId) {
   return p;
 }
 
-/** Restituisce il modello OpenAI da usare per la chat in base al piano: Free/Starter → mini, Pro → 4o, Elite → 4-turbo. */
+/** Restituisce il modello OpenAI da usare per la chat in base al piano. */
 function getChatModelForPlan(planId, isFree, useTokenPack) {
   if (useTokenPack) return OPENAI_MODEL_STARTER;
+  if (planId === OWNER_UNLIMITED_PLAN_ID) return OPENAI_MODEL_ELITE;
   if (isFree || !planId) return OPENAI_MODEL_STARTER;
   const p = String(planId).trim();
   if (p.startsWith('sub_elite') || p === 'life_elite') return OPENAI_MODEL_ELITE;
@@ -357,12 +348,8 @@ function isIsoPast(iso) {
 
 function computeSubscriptionActive(billing) {
   const status = billing?.status || 'none';
+  if (status === 'owner_unlimited') return true;
   if (status === 'active') return true;
-  if (status === 'trialing') {
-    const ends = billing?.trialEndsAt;
-    if (ends && isIsoPast(ends)) return false;
-    return true;
-  }
   return false;
 }
 
@@ -840,6 +827,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let openaiKey = null;
     let uid = null;
     let billingSnapshot = null;
+    let isMasterUser = false;
     if (idToken && firebaseInitialized) {
       // Regola:
       // - Master: usa OPENAI_API_KEY (se presente)
@@ -849,19 +837,19 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         const authData = await requireAuth(idToken);
         uid = authData?.uid || null;
         const email = authData?.email || null;
-        if (email && isMaster(email) && OPENAI_API_KEY) {
+        isMasterUser = !!(email && isMaster(email));
+        if (isMasterUser && OPENAI_API_KEY) {
           openaiKey = OPENAI_API_KEY;
         } else if (uid && OPENAI_API_KEY) {
           const billing = await readBilling(uid);
           billingSnapshot = billing;
           const status = billing?.status || 'none';
           const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+          const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
           const active = mode === 'subscription'
             ? computeSubscriptionActive(billing)
             : status === 'paid';
-          // OPENAI_API_KEY per abbonamenti, per trial, o per piano free (nessun billing = free)
-          if (active && mode === 'subscription') openaiKey = OPENAI_API_KEY;
-          else if (!billing) openaiKey = OPENAI_API_KEY; // piano free: nessun record billing
+          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // token non valido → si passa all'eventuale apiKey client
@@ -888,39 +876,28 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const billingForVision = billingSnapshot || (await readBilling(uid));
       const planId = billingForVision?.planId || '';
       const visionNotAllowed = ['sub_starter', 'sub_starter_annual', 'life_starter'].includes(planId);
-      if (visionNotAllowed && (billingForVision?.status === 'active' || billingForVision?.status === 'trialing' || billingForVision?.status === 'paid')) {
+      if (visionNotAllowed && (billingForVision?.status === 'active' || billingForVision?.status === 'paid')) {
         return res.status(403).json({ error: 'vision_requires_pro_plan' });
       }
     }
 
-    // Trial / Free / Subscription: restrizioni e limite giornaliero (solo quando si usa la chiave server, non pacchetto token)
-    if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack) {
+    // Accesso server-key: richiede piano attivo (o owner), con limiti solo per subscription
+    if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
       const status = billing?.status || 'none';
       const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
-      const isFree = !billing || status === 'free' || mode === 'free';
-      const isTrial = status === 'trialing' && mode === 'subscription';
-      if (isTrial && billing?.trialEndsAt && isIsoPast(billing.trialEndsAt)) {
-        return res.status(403).json({ error: 'Trial scaduta. Attiva un abbonamento per continuare.' });
-      }
-      if (isTrial && imageBase64) {
-        return res.status(403).json({ error: 'Vision AI non disponibile durante la trial. Attiva un abbonamento per usare le immagini.' });
-      }
-      // Vision: bloccata per free (e già per Starter/trial)
-      if (imageBase64 && isFree) {
-        return res.status(403).json({ error: 'Vision AI disponibile con abbonamento o Lifetime. Vai ad Abbonamento per sbloccarla.' });
+      const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
+      const isSubscription = mode === 'subscription' && status === 'active';
+      if (!isOwnerUnlimited && !isSubscription) {
+        return res.status(403).json({ error: 'Nessun piano attivo. Attiva un abbonamento o un piano Lifetime per continuare.' });
       }
       const day = dateISO();
       const used = await readChatUsage(uid, day);
       let limit = null;
-      if (isFree) {
-        limit = FREE_DAILY_LIMIT;
-      } else if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
-        const planId = billing?.planId || BILLING_TRIAL_PLAN_ID || 'sub_starter';
+      if (!isOwnerUnlimited && mode === 'subscription' && status === 'active') {
+        const planId = billing?.planId || 'sub_starter';
         const limitKey = normalizePlanIdForLimits(planId);
-        limit = isTrial
-          ? BILLING_TRIAL_DAILY_LIMIT
-          : (DAILY_LIMITS_BY_PLAN[limitKey] || BILLING_TRIAL_DAILY_LIMIT);
+        limit = DAILY_LIMITS_BY_PLAN[limitKey] || _dailyLimitStarter;
       }
       if (limit != null && used >= limit) {
         return res.status(429).json({ error: 'daily_high_priority_credits_used' });
@@ -945,11 +922,11 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
-    // Modello per tier (Free/Starter = mini, Pro = 4o, Elite = 4-turbo); usato in system prompt e in payload
+    // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
       const billingForModel = billingSnapshot || (await readBilling(uid));
-      chatModel = getChatModelForPlan(billingForModel?.planId, !billingForModel || billingForModel?.status === 'free' || billingForModel?.mode === 'free', useTokenPack);
+      chatModel = getChatModelForPlan(billingForModel?.planId, false, useTokenPack);
     }
     const messages = [];
     const systemContent = buildOxySystemPrompt({
@@ -1184,9 +1161,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const billing = billingSnapshot || (await readBilling(uid));
       const status = billing?.status || 'none';
       const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
-      const isSub = mode === 'subscription' && (status === 'active' || status === 'trialing');
+      const isSub = mode === 'subscription' && status === 'active';
+      const isOwnerUnlimited = mode === 'owner' || status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID;
       const isLifetime = mode === 'payment' && status === 'paid';
-      if (isSub || isLifetime) await incUsage(uid, dateISO(), 1, totalTokens);
+      if (isSub || isLifetime || isOwnerUnlimited) await incUsage(uid, dateISO(), 1, totalTokens);
       if (useTokenPack) await incUsage(uid, dateISO(), 1, totalTokens);
       if (useTokenPack && totalTokens > 0) {
         const balance = await readTokenBalance(uid);
@@ -1547,10 +1525,11 @@ app.post('/api/voice/transcribe', voiceLimiter, async (req, res) => {
           const billing = await readBilling(uid);
           const status = billing?.status || 'none';
           const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+          const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
           const active = mode === 'subscription'
-            ? status === 'active' || status === 'trialing'
+            ? status === 'active'
             : status === 'paid';
-          if (active && mode === 'subscription') openaiKey = OPENAI_API_KEY;
+          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // token non valido → si passa all'eventuale apiKey client
@@ -1605,11 +1584,12 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
           const billing = await readBilling(uid);
           const status = billing?.status || 'none';
           const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+          const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
           const active = mode === 'subscription'
-            ? status === 'active' || status === 'trialing'
+            ? status === 'active'
             : status === 'paid';
           // Per proteggere i costi: OPENAI_API_KEY solo per abbonamenti (non per Lifetime)
-          if (active && mode === 'subscription') openaiKey = OPENAI_API_KEY;
+          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // se il token è invalido, si passa al flusso clientApiKey (che comunque richiede una chiave)
@@ -2222,61 +2202,56 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
 app.get('/api/billing/status', billingLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
-    const { uid } = await requireAuth(idToken);
+    const { uid, email } = await requireAuth(idToken);
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
-    // Registra primo accesso per early-adopter / 50% sconto (sempre, anche se ha già billing)
-    await ensureUserMeta(uid);
-    const data = await readBilling(uid);
-    if (!data) {
-      // Trial auto-assegnata (se abilitata) — utile per go-live senza pagamenti immediati.
-      // Importante: richiede OPENAI_API_KEY lato server, altrimenti non avrebbe senso.
-      if (BILLING_TRIAL_ENABLED && OPENAI_API_KEY) {
-        const ends = new Date(Date.now() + BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-        const planId = BILLING_TRIAL_PLAN_ID || 'sub_starter';
-        await writeBilling(uid, {
-          uid,
-          planId,
-          mode: 'subscription',
-          status: 'trialing',
-          trialEndsAt: ends,
-          grantedBy: 'trial',
-        });
-        const day = dateISO();
-        const used = await readChatUsage(uid, day);
-        const tokensUsed = await readTokenUsage(uid, day);
-        const tokenBalance = await readTokenBalance(uid);
-        const limitKey = normalizePlanIdForLimits(planId);
-        const limit = DAILY_LIMITS_BY_PLAN[limitKey] ?? BILLING_TRIAL_DAILY_LIMIT;
-        return res.json({
-          active: true,
-          status: 'trialing',
-          planId,
-          mode: 'subscription',
-          trialEndsAt: ends,
-          usage: { used, limit, tokensUsed, tokenBalance },
-        });
-      }
-      // Piano gratuito: nessun abbonamento/Lifetime, 5 msg/giorno con chiave server
-      await ensureUserMeta(uid); // registra utente (createdAt) per early-adopter / 50% sconto
-      const userMeta = await readUserMeta(uid);
+    const isOwnerMaster = !!(email && isMaster(email));
+    if (isOwnerMaster) {
       const day = dateISO();
       const used = await readChatUsage(uid, day);
       const tokensUsed = await readTokenUsage(uid, day);
       const tokenBalance = await readTokenBalance(uid);
-      const limit = FREE_DAILY_LIMIT;
+      const current = await readBilling(uid);
+      if (!current || current?.status !== 'owner_unlimited' || current?.mode !== 'owner') {
+        await writeBilling(uid, {
+          uid,
+          planId: OWNER_UNLIMITED_PLAN_ID,
+          mode: 'owner',
+          status: 'owner_unlimited',
+          grantedBy: 'master_email',
+          grantedAt: new Date().toISOString(),
+        });
+      }
+      return res.json({
+        active: true,
+        status: 'owner_unlimited',
+        planId: OWNER_UNLIMITED_PLAN_ID,
+        mode: 'owner',
+        usage: { used, limit: null, tokensUsed, tokenBalance },
+        ownerUnlimited: true,
+      });
+    }
+    // Registra primo accesso per early-adopter / 50% sconto (sempre, anche se ha già billing)
+    await ensureUserMeta(uid);
+    const data = await readBilling(uid);
+    if (!data) {
+      const day = dateISO();
+      const used = await readChatUsage(uid, day);
+      const tokensUsed = await readTokenUsage(uid, day);
+      const tokenBalance = await readTokenBalance(uid);
+      const userMeta = await readUserMeta(uid);
       return res.json({
         active: false,
-        status: 'free',
-        planId: 'free',
-        mode: 'free',
-        usage: { used, limit, tokensUsed, tokenBalance },
+        status: 'none',
+        planId: null,
+        mode: null,
+        usage: { used, limit: null, tokensUsed, tokenBalance },
         ...(userMeta?.sharedForDiscount && { sharedForDiscount: true, sharedAt: userMeta.sharedAt }),
       });
     }
     const status = data.status || 'unknown';
     const mode = data.mode || (data.planId && String(data.planId).startsWith('sub_') ? 'subscription' : 'payment');
     // Regola:
-    // - subscription → attivo se status === active o trialing
+    // - subscription → attivo se status === active
     // - payment (Lifetime/one-shot) → attivo se status === paid
     const active = mode === 'payment'
       ? status === 'paid'
@@ -2286,12 +2261,14 @@ app.get('/api/billing/status', billingLimiter, async (req, res) => {
     const tokensUsed = await readTokenUsage(uid, day);
     const tokenBalance = await readTokenBalance(uid);
     let usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
-    if (mode === 'subscription' && (status === 'active' || status === 'trialing')) {
-      const planId = data.planId || BILLING_TRIAL_PLAN_ID || 'sub_starter';
+    if (mode === 'owner' || status === 'owner_unlimited' || data.planId === OWNER_UNLIMITED_PLAN_ID) {
+      usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
+    } else if (mode === 'subscription' && status === 'active') {
+      const planId = data.planId || 'sub_starter';
       const limitKey = normalizePlanIdForLimits(planId);
       usage = {
         used: usedToday,
-        limit: DAILY_LIMITS_BY_PLAN[limitKey] ?? BILLING_TRIAL_DAILY_LIMIT,
+        limit: DAILY_LIMITS_BY_PLAN[limitKey] ?? _dailyLimitStarter,
         tokensUsed,
         tokenBalance,
       };
@@ -2304,7 +2281,7 @@ app.get('/api/billing/status', billingLimiter, async (req, res) => {
       planId: data.planId || null,
       mode,
       usage,
-      ...(data.trialEndsAt ? { trialEndsAt: data.trialEndsAt } : {}),
+      ...(status === 'owner_unlimited' ? { ownerUnlimited: true } : {}),
     });
   } catch (e) {
     console.error('[Backend] GET /api/billing/status error:', e);
@@ -2329,6 +2306,36 @@ app.post('/api/user/share-done', billingLimiter, async (req, res) => {
   } catch (e) {
     console.error('[Backend] POST /api/user/share-done error:', e);
     res.status(500).json({ error: 'Errore. Riprova più tardi.' });
+  }
+});
+
+// POST /api/billing/redeem-owner-code — riservato al proprietario: abilita accesso senza limiti
+app.post('/api/billing/redeem-owner-code', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+    if (!OWNER_ACCESS_CODE) {
+      return res.status(503).json({ error: 'OWNER_ACCESS_CODE non configurato sul server.' });
+    }
+    if (!code || code !== OWNER_ACCESS_CODE) {
+      return res.status(403).json({ error: 'Codice proprietario non valido.' });
+    }
+
+    await writeBilling(uid, {
+      uid,
+      planId: OWNER_UNLIMITED_PLAN_ID,
+      mode: 'owner',
+      status: 'owner_unlimited',
+      grantedBy: 'owner_code',
+      grantedAt: new Date().toISOString(),
+    });
+    return res.json({ ok: true, planId: OWNER_UNLIMITED_PLAN_ID, mode: 'owner', status: 'owner_unlimited' });
+  } catch (e) {
+    console.error('[Backend] POST /api/billing/redeem-owner-code error:', e);
+    return res.status(500).json({ error: 'Errore durante l\'attivazione del codice proprietario.' });
   }
 });
 

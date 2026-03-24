@@ -25,9 +25,7 @@ export async function saveUserProfile(uid, profile) {
       birth_date: profile?.birth_date ?? '',
       updated_at: new Date().toISOString(),
     }, { merge: true });
-  } catch (e) {
-    console.warn('[profileService] saveUserProfile error', e?.message);
-  }
+  } catch (_) {}
 }
 
 export async function getUserProfile(uid) {
@@ -43,8 +41,7 @@ export async function getUserProfile(uid) {
       phone: d?.phone ?? '',
       birth_date: d?.birth_date ?? '',
     };
-  } catch (e) {
-    console.warn('[profileService] getUserProfile error', e?.message);
+  } catch (_) {
     return null;
   }
 }

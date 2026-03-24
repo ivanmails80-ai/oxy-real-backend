@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Abbonamenti OXY Pass — OXY Real</title>
+    <meta name="description" content="Abbonati a OXY Real: Starter, Pro o Elite. Pagamento mensile, chiave inclusa. L'AI che non dimentica.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@200;300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --accent-gold: #c5a059;
+            --accent-bright: #f1d3a1;
+            --text-light: #e0e0e0;
+            --bg-dark: #001425;
+            --navy: #002b4d;
+            --transition: all 0.5s cubic-bezier(0.165, 0.84, 0.44, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+        body, html {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--bg-dark);
+            background-image: radial-gradient(ellipse at center, #003158 0%, #001425 70%, #000a12 100%);
+            min-height: 100vh;
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+
+        a { color: var(--accent-gold); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Header coerente con index.html */
+        .top-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 64px;
+            padding: 0 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 20, 40, 0.9);
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid rgba(197, 160, 89, 0.25);
+            z-index: 10000;
+        }
+        .top-logo {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            font-family: 'Cinzel', serif;
+            color: var(--accent-gold);
+            text-decoration: none;
+        }
+        .top-logo:hover { text-decoration: none; }
+        .top-logo-main {
+            font-size: 1.1rem;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .top-logo-sub {
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            font-style: italic;
+            text-transform: none;
+            margin-top: -2px;
+        }
+        .top-nav {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            font-family: 'Cinzel', serif;
+            font-size: 0.8rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        .top-nav a {
+            color: rgba(224,224,224,0.9);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+        .top-nav a:hover {
+            color: var(--accent-gold);
+            text-decoration: none;
+        }
+        .top-nav a.active {
+            color: var(--accent-gold);
+        }
+
+        .wrap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 100px 24px 64px;
+        }
+
+        /* Stile titolo e testi = overlay Piani index.html */
+        .page-title {
+            font-family: 'Cinzel', serif;
+            font-size: clamp(1.8rem, 5vw, 2.8rem);
+            color: var(--accent-gold);
+            letter-spacing: 12px;
+            text-align: center;
+            margin-bottom: 40px;
+            font-weight: normal;
+        }
+        .content-text {
+            font-size: 1.1rem;
+            line-height: 2.2;
+            color: #ccc;
+            text-align: justify;
+            font-weight: 300;
+            margin-bottom: 32px;
+        }
+        .content-text strong { color: var(--accent-gold); font-weight: 500; }
+        .content-text a { text-decoration: none; }
+        .content-text a:hover { text-decoration: underline; }
+
+        /* Frecce navigazione sequenziale = overlay */
+        .seq-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 24px 0;
+            padding: 20px 0;
+            border-top: 1px solid rgba(197, 160, 89, 0.15);
+            border-bottom: 1px solid rgba(197, 160, 89, 0.15);
+        }
+        .seq-btn {
+            color: var(--accent-gold);
+            font-family: 'Cinzel', serif;
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            transition: var(--transition);
+            text-decoration: none;
+        }
+        .seq-btn:hover { color: #fff; letter-spacing: 5px; }
+        .seq-btn:disabled, .seq-btn.disabled { opacity: 0.15; cursor: default; pointer-events: none; }
+
+        /* Griglia piani */
+        .plans {
+            display: grid;
+            gap: 24px;
+            grid-template-columns: 0.9fr 1.3fr 0.9fr;
+            align-items: stretch;
+        }
+
+        .plan {
+            display: flex;
+            flex-direction: column;
+            background: rgba(0, 43, 77, 0.4);
+            border: 1px solid rgba(197, 160, 89, 0.35);
+            border-radius: 12px;
+            padding: 28px 24px;
+            position: relative;
+            transition: var(--transition);
+        }
+
+        .plan.plan-featured {
+            border-color: rgba(197, 160, 89, 0.6);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+            padding: 32px 28px;
+            background: radial-gradient(circle at top, rgba(0, 80, 150, 0.5), rgba(0, 30, 60, 0.6));
+            transform: translateY(-6px) scale(1.03);
+        }
+
+        .plan-badge {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--accent-gold);
+            color: #0a0a0a;
+            font-family: 'Cinzel', serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            padding: 6px 16px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        .plan h2 {
+            font-family: 'Cinzel', serif;
+            color: var(--accent-gold);
+            font-size: 1rem;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+        .plan .price {
+            color: #fff;
+            font-size: 1.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 4px;
+        }
+        .plan .period {
+            color: #888;
+            font-size: 0.8rem;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .plan .description {
+            color: #bbb;
+            font-size: 0.9rem;
+            text-align: center;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .plan ul {
+            list-style: none;
+            margin-bottom: 24px;
+            flex-grow: 1;
+        }
+        .plan ul li {
+            color: #d1d1d1;
+            font-size: 0.9rem;
+            padding: 8px 0;
+            padding-left: 28px;
+            position: relative;
+            border-bottom: 1px solid rgba(197, 160, 89, 0.1);
+        }
+        .plan ul li:last-child { border-bottom: none; }
+        .plan ul li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: var(--accent-gold);
+            font-weight: bold;
+        }
+
+        .plan .btn-wrap { margin-top: auto; }
+
+        .btn-plan {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 52px;
+            min-height: 52px;
+            padding: 12px 24px;
+            background: var(--accent-gold);
+            color: #0a0a0a;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            border-radius: 10px;
+            transition: var(--transition);
+            text-align: center;
+            line-height: 1.35;
+            text-decoration: none;
+        }
+        .btn-plan span { display: block; }
+        .btn-plan:hover {
+            background: var(--accent-bright);
+            text-decoration: none;
+            color: #0a0a0a;
+            transform: translateY(-2px);
+        }
+
+        /* Sezione vantaggi */
+        .benefits {
+            margin-top: 56px;
+            padding: 32px;
+            background: rgba(0, 43, 77, 0.3);
+            border: 1px solid rgba(197, 160, 89, 0.2);
+            border-radius: 12px;
+        }
+        .benefits h3 {
+            font-family: 'Cinzel', serif;
+            color: var(--accent-gold);
+            font-size: 1rem;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .benefits-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+        .benefit-item {
+            text-align: center;
+        }
+        .benefit-item .icon {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .benefit-item p {
+            color: #b5b5b5;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        /* CTA finale */
+        .cta-app {
+            text-align: center;
+            margin-top: 48px;
+            padding: 40px 24px;
+            background: rgba(0, 43, 77, 0.3);
+            border-radius: 12px;
+            border: 1px solid rgba(197, 160, 89, 0.25);
+        }
+        .cta-app h2 {
+            font-family: 'Cinzel', serif;
+            color: var(--accent-gold);
+            font-size: 1.1rem;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .cta-app p {
+            color: #b5b5b5;
+            margin-bottom: 24px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .btn-cta {
+            display: inline-block;
+            padding: 16px 40px;
+            background: var(--accent-gold);
+            color: #0a0a0a;
+            font-family: 'Cinzel', serif;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            border-radius: 10px;
+            transition: var(--transition);
+        }
+        .btn-cta:hover {
+            background: var(--accent-bright);
+            text-decoration: none;
+            color: #0a0a0a;
+            transform: translateY(-2px);
+        }
+
+        .final-phrase {
+            margin-top: 24px;
+            font-family: 'Cinzel', serif;
+            color: var(--accent-gold);
+            font-size: 0.8rem;
+            letter-spacing: 5px;
+            text-align: center;
+            border-top: 1px solid rgba(51, 51, 51, 0.5);
+            padding-top: 36px;
+            text-transform: uppercase;
+        }
+
+        /* Footer */
+        footer {
+            font-family: 'Cinzel', serif;
+            font-size: 0.6rem;
+            color: #555;
+            letter-spacing: 1px;
+            text-align: center;
+            padding: 40px 20px;
+            border-top: 1px solid rgba(51, 51, 51, 0.3);
+            margin-top: 48px;
+        }
+        footer a { color: var(--accent-gold); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .top-bar { padding: 0 16px; }
+            .top-nav { gap: 12px; font-size: 0.65rem; letter-spacing: 1px; }
+            .plans { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
+            .plan.plan-featured { order: -1; transform: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); }
+            .benefits-grid { grid-template-columns: 1fr; gap: 20px; }
+            .wrap { padding-top: 80px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <a href="index.html" class="top-logo">
+            <span class="top-logo-main">SecondSelf</span>
+            <span class="top-logo-sub">OXY Real</span>
+        </a>
+        <div class="top-nav">
+            <a href="index.html#percheOxy">Perché OXY</a>
+            <a href="index.html#lApp">Funzioni</a>
+            <a href="index.html#piani">Piani</a>
+            <a href="index.html#scarica">Scarica</a>
+        </div>
+    </div>
+
+    <div class="wrap">
+        <div class="seq-nav">
+            <a href="index.html" class="seq-btn">← Torna alla Home</a>
+            <a href="acquisto-unica-volta.html" class="seq-btn">Vai ai Piani Lifetime →</a>
+        </div>
+
+        <h1 class="page-title">Abbonamenti e Piani Lifetime</h1>
+        <div class="content-text">
+            Trova il piano perfetto per te. <strong>Abbonamento mensile</strong> (OXY Pass Starter, Pro, Elite) con chiave inclusa e zero configurazioni, oppure <strong><a href="acquisto-unica-volta.html">Piani Lifetime</a></strong> con pagamento unico e la tua chiave API. Qualunque sia il tuo stile — uso quotidiano, professionale o power user — c'è un piano pensato per te.
+        </div>
+
+        <div class="plans">
+            <div class="plan">
+                <h2>OXY Pass Starter</h2>
+                <div class="price">19 €</div>
+                <div class="period">/ mese</div>
+                <p class="description">Perfetto per iniziare. Un assistente AI che ti conosce e ti accompagna ogni giorno, senza complicazioni.</p>
+                <ul>
+                    <li>Chat con Oxy (modelli standard)</li>
+                    <li>Memory Vault base – Oxy ti ricorda</li>
+                    <li>Diario e Storie personali</li>
+                    <li>Voce base per TTS</li>
+                    <li>Fino a 50 messaggi/giorno</li>
+                    <li>Chiave API inclusa</li>
+                </ul>
+                <div class="btn-wrap">
+                    <a href="index.html#scarica" class="btn-plan">
+                        <span>Scarica</span>
+                        <span>e abbonati</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="plan plan-featured">
+                <span class="plan-badge">Più scelto</span>
+                <h2>OXY Pass Pro</h2>
+                <div class="price">39 €</div>
+                <div class="period">/ mese</div>
+                <p class="description">Il piano più scelto da chi lavora con l'AI. Per freelance e professionisti che vogliono massimizzare la produttività ogni giorno.</p>
+                <ul>
+                    <li>Modelli Pro (GPT-4o e superiori)</li>
+                    <li>Memory Vault esteso – più contesto</li>
+                    <li>Vision: analizza immagini e documenti</li>
+                    <li>Tutte le voci premium</li>
+                    <li>Fino a 150 messaggi/giorno</li>
+                    <li>Chiave API inclusa</li>
+                </ul>
+                <div class="btn-wrap">
+                    <a href="index.html#scarica" class="btn-plan">
+                        <span>Scarica</span>
+                        <span>e abbonati</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="plan">
+                <h2>OXY Pass Elite</h2>
+                <div class="price">59 €</div>
+                <div class="period">/ mese</div>
+                <p class="description">Per chi vuole il massimo. Power user che non accettano compromessi: massima potenza, zero limiti, accesso anticipato alle novità.</p>
+                <ul>
+                    <li>Modelli Elite (massime prestazioni)</li>
+                    <li>Memory Vault max – memoria completa</li>
+                    <li>Vision estesa e audio avanzato</li>
+                    <li>Accesso anticipato a nuove funzioni</li>
+                    <li>Fino a 400 messaggi/giorno</li>
+                    <li>Chiave API inclusa</li>
+                </ul>
+                <div class="btn-wrap">
+                    <a href="index.html#scarica" class="btn-plan">
+                        <span>Scarica</span>
+                        <span>e abbonati</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="benefits">
+            <h3>Perché migliaia di utenti scelgono OXY Pass</h3>
+            <div class="benefits-grid">
+                <div class="benefit-item">
+                    <div class="icon">🔑</div>
+                    <p><strong>Zero configurazioni</strong><br>La chiave API è già attiva. Scarica l'app, accedi e parti subito. Nessun setup tecnico, nessuna complicazione.</p>
+                </div>
+                <div class="benefit-item">
+                    <div class="icon">🔄</div>
+                    <p><strong>Massima flessibilità</strong><br>Cambi piano quando vuoi, disdici quando vuoi. Nessun vincolo, nessuna sorpresa. Tu controlli tutto.</p>
+                </div>
+                <div class="benefit-item">
+                    <div class="icon">🚀</div>
+                    <p><strong>Sempre al passo</strong><br>Nuove funzioni e modelli AI più potenti arrivano automaticamente nel tuo piano. Resti sempre aggiornato.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="cta-app">
+            <h2>Pronto a trasformare il modo in cui lavori?</h2>
+            <p>Scarica OXY Real e attiva subito il tuo piano premium. Nessuna trial: esperienza completa, qualità alta e accesso immediato alle funzioni del livello scelto.</p>
+            <a href="index.html#scarica" class="btn-cta">Scarica OXY Real</a>
+        </div>
+
+        <div class="seq-nav">
+            <a href="index.html" class="seq-btn">← Torna alla Home</a>
+            <a href="acquisto-unica-volta.html" class="seq-btn">Vai ai Piani Lifetime →</a>
+        </div>
+        <div class="final-phrase">Scegli il piano e inizia con Oxy</div>
+    </div>
+
+    <footer>
+        © 2026 OXY Real · SecondSelf di Ivan Lopez · <a href="https://www.oxyreal.it">www.oxyreal.it</a><br>
+        <a href="privacy.html">Privacy</a> · <a href="termini.html">Termini</a> · <a href="mailto:oxy@oxyreal.it">oxy@oxyreal.it</a>
+    </footer>
+
+</body>
+</html>

@@ -2,11 +2,13 @@
  * Diario interattivo OXY — chiamate al backend GET/POST /api/diary
  */
 
-const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+import { getBackendBaseUrl } from '../config/backendConfig';
+
+const getBaseUrl = () => getBackendBaseUrl();
 
 async function requestWithToken(method, path, idToken, body = null) {
   const base = getBaseUrl();
-  if (!base) throw new Error('EXPO_PUBLIC_BACKEND_URL non impostato');
+  if (!base) throw new Error('Endpoint server non configurato');
   const url = path.startsWith('/') ? `${base}${path}` : `${base}/${path}`;
   const opts = {
     method,
@@ -36,8 +38,7 @@ export async function loadDiary(idToken) {
       entries: Array.isArray(data.entries) ? data.entries : [],
       progressSummary: typeof data.progressSummary === 'string' ? data.progressSummary : '',
     };
-  } catch (e) {
-    console.warn('[diaryService] loadDiary error:', e?.message);
+  } catch (_) {
     return { themes: [], entries: [], progressSummary: '' };
   }
 }
@@ -50,4 +51,15 @@ export async function loadDiary(idToken) {
 export async function saveDiaryEntry(idToken, payload = {}) {
   if (!getBaseUrl() || !idToken) throw new Error('Backend non configurato');
   return requestWithToken('POST', '/api/diary', idToken, payload);
+}
+
+/**
+ * Elimina una voce del diario
+ * @param {string} idToken
+ * @param {string} entryId
+ */
+export async function deleteDiaryEntry(idToken, entryId) {
+  if (!getBaseUrl() || !idToken) throw new Error('Backend non configurato');
+  if (!entryId || typeof entryId !== 'string') throw new Error('ID voce richiesto');
+  return requestWithToken('POST', '/api/diary', idToken, { deleteEntryId: entryId.trim() });
 }

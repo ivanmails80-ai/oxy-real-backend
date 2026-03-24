@@ -2,7 +2,9 @@
  * Trascrizione vocale OXY — invio audio al backend (Whisper), ritorno testo (roadmap 2.1)
  */
 
-const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '');
+import { getBackendBaseUrl } from '../config/backendConfig';
+
+const getBaseUrl = () => getBackendBaseUrl();
 
 /**
  * Invia audio in base64 al backend per trascrizione.
@@ -13,7 +15,7 @@ const getBaseUrl = () => (typeof process !== 'undefined' && process.env?.EXPO_PU
  */
 export async function transcribe(idToken, audioBase64, apiKey = null) {
   const base = getBaseUrl();
-  if (!base) throw new Error('EXPO_PUBLIC_BACKEND_URL non impostato');
+  if (!base) throw new Error('Endpoint server non configurato');
   const body = { audioBase64 };
   if (apiKey) body.apiKey = apiKey;
   const res = await fetch(`${base}/api/voice/transcribe`, {

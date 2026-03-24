@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pagamento Completato - OXY Real</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            background-image: radial-gradient(ellipse at center, #0d1520 0%, #0a0a0a 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            background: rgba(0, 43, 77, 0.5);
+            border: 1px solid rgba(197, 160, 89, 0.35);
+            border-radius: 12px;
+            padding: 40px 30px;
+        }
+        .icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 30px;
+            background: #43a047;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #0a0a0a;
+        }
+        h1 { font-size: 28px; margin-bottom: 15px; color: #c5a059; }
+        p { font-size: 16px; line-height: 1.6; color: #d1d1d1; margin-bottom: 30px; }
+        .button {
+            display: inline-block;
+            padding: 14px 30px;
+            background: #c5a059;
+            color: #0a0a0a;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 16px;
+            transition: background 0.2s;
+        }
+        .button:hover { background: #d4b068; text-decoration: none; color: #0a0a0a; }
+        .info { margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 14px; color: #888; }
+        .info a { color: #c5a059; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✓</div>
+        <h1>Pagamento Completato!</h1>
+        <p>Grazie per il tuo acquisto. Il tuo abbonamento OXY Real è stato attivato con successo.</p>
+        <p>Puoi tornare all'app e iniziare a utilizzare tutte le funzionalità del tuo piano.</p>
+        <a href="oxyreal://success" class="button">Torna all'App</a>
+        <div class="info">Assistenza: <a href="mailto:oxy@oxyreal.it">oxy@oxyreal.it</a></div>
+    </div>
+</body>
+</html>
