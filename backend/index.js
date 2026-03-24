@@ -818,7 +818,7 @@ Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { idToken, apiKey: clientApiKey, geminiApiKey: clientGeminiKey, history, message, imageBase64, language, moduleName, customAiName, voiceId, userName, nowStr, dateISO, initialMessage } = req.body;
+    const { idToken, apiKey: clientApiKey, geminiApiKey: clientGeminiKey, history, message, imageBase64, language, moduleName, customAiName, voiceId, userName, nowStr, dateISO: dateISOInput, initialMessage } = req.body;
     const useGemini = isValidGeminiKey(clientGeminiKey);
     if (!idToken && !clientApiKey && !useGemini) {
       return res.status(400).json({ error: 'idToken, Oxy Key o chiave Gemini richiesti' });
@@ -934,7 +934,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
       userName: typeof userName === 'string' ? userName.trim() : '',
       nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
-      dateISO: dateISO || new Date().toISOString().slice(0, 10),
+      dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
       language: language || 'it',
       moduleName: moduleName || 'default',
       memoryBlock,
