@@ -142,7 +142,7 @@ function isValidGeminiKey(key) {
 /**
  * Chiama Gemini (Google AI) con messaggi in formato OpenAI-like.
  * Restituisce { text } o lancia in caso di errore.
- * Nessun tool (web search / memory): solo conversazione. Con Gemini l'utente usa il free tier Google.
+ * Nessun tool (web search / memory): solo conversazione. Gemini è gratuito per l'utente.
  */
 async function callGeminiChat(messages, geminiApiKey, imageBase64 = null) {
   const key = geminiApiKey.trim();
@@ -325,10 +325,10 @@ function normalizePlanIdForLimits(planId) {
 }
 
 /** Restituisce il modello OpenAI da usare per la chat in base al piano. */
-function getChatModelForPlan(planId, isFree, useTokenPack) {
+function getChatModelForPlan(planId, useTokenPack) {
   if (useTokenPack) return OPENAI_MODEL_STARTER;
   if (planId === OWNER_UNLIMITED_PLAN_ID) return OPENAI_MODEL_ELITE;
-  if (isFree || !planId) return OPENAI_MODEL_STARTER;
+  if (!planId) return OPENAI_MODEL_STARTER; // Nessun piano attivo
   const p = String(planId).trim();
   if (p.startsWith('sub_elite') || p === 'life_elite') return OPENAI_MODEL_ELITE;
   if (p.startsWith('sub_pro') || p === 'life_pro') return OPENAI_MODEL_PRO;
@@ -926,7 +926,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
       const billingForModel = billingSnapshot || (await readBilling(uid));
-      chatModel = getChatModelForPlan(billingForModel?.planId, false, useTokenPack);
+      chatModel = getChatModelForPlan(billingForModel?.planId, useTokenPack);
     }
     const messages = [];
     const systemContent = buildOxySystemPrompt({

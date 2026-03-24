@@ -178,7 +178,7 @@ const STORAGE_KEYS = {
   LANGUAGE: '@oxyreal:language',
   HAS_CHOSEN_LANGUAGE_AT_STARTUP: '@oxyreal:hasChosenLanguageAtStartup',
   HAS_CHOSEN_PLAN_PREFIX: '@oxyreal:hasChosenPlan:', // + userId → 'true' quando ha scelto Abbonamento/Lifetime (primo avvio o primo login)
-  HAS_SKIPPED_SHARE_GATE_PREFIX: '@oxyreal:hasSkippedShareGate:', // + userId → 'true' se free ha scelto "Entra in chat" senza condividere (go-live solo free: massimizza registrazioni)
+  HAS_SKIPPED_SHARE_GATE_PREFIX: '@oxyreal:hasSkippedShareGate:', // Legacy - non più usato
   // Student Edition (percorso Studio / Vita & Lavoro)
   USE_CASE: '@oxyreal:useCase', // 'study' | 'life'
   STUDENT_LEVEL: '@oxyreal:studentLevel', // 'highschool' | 'university'
@@ -503,7 +503,7 @@ export default function App() {
   // Scelta tipo piano (Abbonamento/Lifetime) fatta → mostriamo schermata Starter / Pro / Elite
   const [showPlanTierSelection, setShowPlanTierSelection] = useState(false);
   const [planTypeChosen, setPlanTypeChosen] = useState(null); // 'subscription' | 'lifetime'
-  const [skippedShareGateForFree, setSkippedShareGateForFree] = useState(false); // true = free user ha tap "Entra in chat" senza condividere
+  const [skippedShareGateForFree, setSkippedShareGateForFree] = useState(false); // Legacy - non più usato
   const [regData, setRegData] = useState({
     nome: '',
     cognome: '',
@@ -562,7 +562,7 @@ export default function App() {
 
   // Rate limit invio: blocco pulsante durante richiesta + 2s dopo completamento (successo o errore)
   const [sendInCooldown, setSendInCooldown] = useState(false);
-  const freeLimitReached = false;
+  const freeLimitReached = false; // Rimosso supporto free tier
   const isSendBlocked = staCaricando || sendInCooldown || freeLimitReached;
 
   // Chat history per memorizzare scambi { role, content }
@@ -1245,14 +1245,12 @@ export default function App() {
         setBillingStatus((prev) => ({ ...prev, loading: false }));
         return;
       }
-      const normalizedFree = data?.status === 'free' || data?.mode === 'free' || data?.planId === 'free';
-      const nowActive = normalizedFree ? false : !!data.active;
       setBillingStatus({
         loading: false,
-        active: nowActive,
-        status: normalizedFree ? 'none' : (data.status || 'none'),
-        planId: normalizedFree ? null : (data.planId || null),
-        mode: normalizedFree ? null : (data.mode || null),
+        active: !!data.active,
+        status: data.status || 'none',
+        planId: data.planId || null,
+        mode: data.mode || null,
         usage: data.usage && typeof data.usage.used === 'number'
           ? {
               used: data.usage.used,

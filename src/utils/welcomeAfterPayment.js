@@ -48,11 +48,9 @@ export function getWelcomeMessageAfterPayment(planId, mode, t) {
   const features = getPlanFeatures(planId);
   const planName = plan?.name || planId;
   const planType =
-    mode === 'free'
-      ? t('welcomeAfterPayment.planTypeFree')
-      : mode === 'subscription'
-        ? t('welcomeAfterPayment.planTypeSubscription')
-        : t('welcomeAfterPayment.planTypeLifetime');
+    mode === 'subscription'
+      ? t('welcomeAfterPayment.planTypeSubscription')
+      : t('welcomeAfterPayment.planTypeLifetime');
 
   const intro = t('welcomeAfterPayment.intro', { planName, planType });
   const featuresTitle = t('welcomeAfterPayment.featuresTitle');
