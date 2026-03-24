@@ -761,7 +761,7 @@ IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system
 `;
 }
 
-function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
+function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
   const hasMem = !!(memoryBlock && memoryBlock.trim());
   const hasDiary = !!(diaryBlock && diaryBlock.trim());
   const mem = hasMem
@@ -794,7 +794,7 @@ ${nameLine}
 ${imageBlock}
 ${mem}
 ${diary}
-DATA E ORA: ${nowStr}. Data ISO: ${dateISO}.
+DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
 
 • LINGUA: Rispondi sempre e solo nella lingua indicata in "Lingua:" (es. it, en, fr, es, ar, zh). L'app e l'utente si sono regolati su quella scelta.
 • CUT-OFF OTTOBRE 2023 — REGOLA FISSA:
