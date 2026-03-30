@@ -1607,6 +1607,10 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
       : 'nova';
     // OpenAI supporta solo: alloy, echo, fable, onyx, nova, shimmer. Cedar non esiste → usiamo fable per Kind Partner.
     const voice = clientVoice === 'cedar' ? 'fable' : clientVoice;
+    const femaleVoices = ['shimmer', 'nova', 'alloy'];
+    const genderInstruction = femaleVoices.includes(clientVoice)
+      ? 'Speak as a woman in fluent Italian. Pronounce every word clearly in Italian, including any English words or names.'
+      : 'Speak as a man in fluent Italian. Pronounce every word clearly in Italian, including any English words or names.';
 
     const ttsRes = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
@@ -1617,7 +1621,7 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
       body: JSON.stringify({
         model: 'tts-1-hd',
         voice,
-        input: text,
+        instructions: genderInstruction,
         response_format: 'mp3',
         speed: 0.92,
       }),
