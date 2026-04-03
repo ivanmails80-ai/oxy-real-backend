@@ -915,7 +915,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (uid) {
       try {
         const diaryData = await readDiary(uid);
-        console.log("[DIARY DEBUG]", JSON.stringify(diaryData));const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
+        const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
         const lastN = entries.slice(-15).map((e) => `[${e.date || ''}] ${(e.content || e.text || '').trim()}`).filter(Boolean);
         diaryBlock = lastN.length > 0 ? lastN.join('\n') : '';
       } catch (_) {}
