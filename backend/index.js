@@ -768,7 +768,7 @@ function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO
     ? `\n\n——— MEMORIA (Memory Vault / Le mie note) ———\n${memoryBlock}\nQuando l'utente chiede "cosa hai memorizzato", "cosa c'è nelle mie note", "leggi la memoria", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
     : '\n\n——— MEMORIA ———\nAl momento nessuna voce in Memory Vault. Se l\'utente chiede cosa c\'è nelle note, dillo con naturalezza.\n';
   const diary = hasDiary
-    ? `\n\n——— DIARIO DELL'UTENTE ———\n${diaryBlock}\nQuando l'utente chiede "cosa ho scritto nel diario", "leggi il diario", "cosa c'è nel diario", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
+    ? `\n\n——— DIARIO DELL'UTENTE (DATI REALI — LEGGILI) ———\n${diaryBlock}\n⚠️ REGOLA ASSOLUTA: Le voci qui sopra ESISTONO e sono reali. Quando l'utente chiede del diario, rispondi SEMPRE citando queste voci. NON dire mai che non ci sono voci o che non hai accesso. Hai i dati: usali.\n`
     : '\n\n——— DIARIO ———\nAl momento nessuna voce nel diario. Se l\'utente chiede cosa ha scritto, dillo con naturalezza.\n';
   const imageBlock = hasImage
     ? '\n• IMMAGINI: Se l\'utente invia un\'immagine, descrivi in modo strutturato (oggetti, contesto, atmosfera o emozioni evocate). Se è un momento significativo (luogo, cibo, documento, persona), puoi suggerire di salvarlo in memoria con save_memory (keyFacts) come "momento visivo" e proporre all\'utente di ricordarlo.\n'
