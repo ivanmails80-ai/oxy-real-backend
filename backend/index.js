@@ -1840,21 +1840,11 @@ app.post('/api/analytics', generalLimiter, async (req, res) => {
 });
 
 // ——— Diario interattivo (roadmap 1.1) ———
-async function ensureDiaryDir() {
-  await fs.mkdir(DIARY_DIR, { recursive: true });
-}
-
-function diaryPath(uid) {
-  const safe = (uid || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(DIARY_DIR, `${safe}.json`);
-}
-
 async function readDiary(uid) {
   if (!uid) return null;
   try {
-    const raw = await fs.readFile(diaryPath(uid), 'utf8');
-    const data = JSON.parse(raw);
-    return data && typeof data === 'object' ? data : null;
+    const doc = await admin.firestore().collection('diaries').doc(uid).get();
+    return doc.exists ? doc.data() : { themes: [], entries: [], progressSummary: '' };
   } catch {
     return null;
   }
@@ -1862,9 +1852,8 @@ async function readDiary(uid) {
 
 async function writeDiary(uid, data) {
   if (!uid || !data || typeof data !== 'object') return;
-  await ensureDiaryDir();
-  const payload = { ...data, updatedAt: new Date().toISOString() };
-  await fs.writeFile(diaryPath(uid), JSON.stringify(payload, null, 0), 'utf8');
+  const updatedData = { ...data, updatedAt: new Date().toISOString() };
+  await admin.firestore().collection('diaries').doc(uid).set(updatedData);
 }
 
 app.get('/api/diary', generalLimiter, async (req, res) => {
