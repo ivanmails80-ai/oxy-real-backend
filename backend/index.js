@@ -2626,7 +2626,6 @@ app.post('/api/billing/webhook', async (req, res) => {
 app.listen(PORT, '0.0.0.0', async () => {
   await ensureDataDir();
   await ensureMemoriesDir();
-  await ensureDiaryDir();
   await ensureStoryStateDir();
   await ensureBillingDir();
   await ensureCreditsDir();
