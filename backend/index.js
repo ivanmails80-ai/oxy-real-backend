@@ -915,10 +915,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (uid) {
       try {
         const diaryData = await readDiary(uid);
+        console.log('[DIARY DEBUG] diaryData:', JSON.stringify(diaryData));
         const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
+        console.log('[DIARY DEBUG] entries count:', entries.length);
         const lastN = entries.slice(-15).map((e) => `[${e.date || ''}] ${(e.content || e.text || '').trim()}`).filter(Boolean);
         diaryBlock = lastN.length > 0 ? lastN.join('\n') : '';
-      } catch (_) {}
+        console.log('[DIARY DEBUG] diaryBlock final:', diaryBlock || '(VUOTO)');
+      } catch (err) {
+        console.error('[DIARY ERROR]', err);
+      }
     }
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
