@@ -3884,6 +3884,72 @@ export default function App() {
     );
   }
 
+  const showKeyOrSubscriptionChoice = isLogged && !hasOxyKey && !hasGeminiKey && !billingStatus.active && !showVoiceChoiceAfterPayment && !showOxyKeyGate && SHOW_UPGRADE;
+  if (showKeyOrSubscriptionChoice) {
+    return (
+      <ErrorBoundary>
+        <SafeAreaProvider>
+          <LinearGradient colors={['#002b4d', '#002b4d']} style={{ flex: 1 }}>
+            <StatusBar barStyle="light-content" />
+            <SafeAreaView style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 24 }} edges={['top']}>
+              <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                <OxyLogo large />
+              </View>
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 14 }}>
+                Scegli come accedere a OXY
+              </Text>
+              <Text style={{ color: '#b0b0c0', fontSize: 15, textAlign: 'center', marginBottom: 24 }}>
+                Usa la tua chiave Gemini o OpenAI, oppure abbonati a OXY Pass.
+              </Text>
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(93,153,197,0.16)', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, borderWidth: 1, borderColor: '#5a9fc5', marginBottom: 14 }}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setOxyKeyError('');
+                  setGeminiKeyError('');
+                  setShowOxyKeyGate(true);
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Usa la tua chiave Gemini</Text>
+                    <Text style={{ color: '#d0d0e0', fontSize: 13 }}>Gratis</Text>
+                  </View>
+                  <View style={{ backgroundColor: '#3b7ea1', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Consigliata</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(197,160,89,0.12)', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, borderWidth: 1, borderColor: '#c5a059', marginBottom: 14 }}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setOxyKeyError('');
+                  setGeminiKeyError('');
+                  setShowOxyKeyGate(true);
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Usa la tua chiave OpenAI</Text>
+                <Text style={{ color: '#d0d0e0', fontSize: 13 }}>Inserisci la tua API Key OpenAI per continuare</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ backgroundColor: '#c5a059', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, marginBottom: 14 }}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setPlanTypeChosen('subscription');
+                  setShowPlanTierSelection(true);
+                }}
+              >
+                <Text style={{ color: '#0a0a0a', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Abbonati a €7,99/mese</Text>
+                <Text style={{ color: '#0a0a0a', fontSize: 13 }}>Sblocca OXY Pass con accesso completo</Text>
+              </TouchableOpacity>
+            </SafeAreaView>
+          </LinearGradient>
+        </SafeAreaProvider>
+      </ErrorBoundary>
+    );
+  }
+
   // Oxy Key Gate: in subscription solo messaggio (nessuna chiave in app).
   if (isLogged && showOxyKeyGate && !isFreePlan && SHOW_UPGRADE) {
     if (!SHOW_OXY_KEY_OPTION) {
