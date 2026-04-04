@@ -861,7 +861,7 @@ readTerms: "Leggi i Termini di Servizio",
       welcome: "Welcome to OXY Real™",
     },
     legal: {
-      ownershipDisclaimer: "© 2026 OXY Real. All rights reserved. OXY and OXY Real™ are trademarks owned exclusively by the OXY ecosystem.",
+      ownershipDisclaimer: "© 2026 OXY Real. All rights reserved. OXY and OXY Real™ are trademarks exclusively owned by the OXY ecosystem.",
     },
     common: {
       loading: "Loading...",
