@@ -52,7 +52,7 @@ function GoogleAuthHook({ webClientId, androidClientId, iosClientId, expoClientI
   const fullResultRef = useRef(null);
   // Expo Go: forziamo redirect proxy "https://auth.expo.io/@owner/slug" per evitare redirect_uri=exp://... (non autorizzabile su Google).
   const proxyRedirectUri = useMemo(() => {
-    const p = (projectNameForProxy || '').trim() || '@alexxivan80/secondself';
+    const p = (projectNameForProxy || '').trim() || '@alexxivan80/oxyreal';
     return `https://auth.expo.io/${p.startsWith('@') ? p : `@${p}`}`;
   }, [projectNameForProxy]);
   // Su Android APK (client tipo Android) Google non accetta response_type=id_token; usare code e scambio token.
