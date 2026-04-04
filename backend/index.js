@@ -254,15 +254,7 @@ function getMailerForWelcome() {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY?.trim();
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET?.trim();
 const STRIPE_PRICE_MAP = {
-  sub_starter: process.env.STRIPE_PRICE_SUB_STARTER?.trim(),
-  sub_pro: process.env.STRIPE_PRICE_SUB_PRO?.trim(),
   sub_elite: process.env.STRIPE_PRICE_SUB_ELITE?.trim(),
-  sub_starter_annual: process.env.STRIPE_PRICE_SUB_STARTER_ANNUAL?.trim(),
-  sub_pro_annual: process.env.STRIPE_PRICE_SUB_PRO_ANNUAL?.trim(),
-  sub_elite_annual: process.env.STRIPE_PRICE_SUB_ELITE_ANNUAL?.trim(),
-  life_starter: process.env.STRIPE_PRICE_LIFE_STARTER?.trim(),
-  life_pro: process.env.STRIPE_PRICE_LIFE_PRO?.trim(),
-  life_elite: process.env.STRIPE_PRICE_LIFE_ELITE?.trim(),
   pack_100k: process.env.STRIPE_PRICE_PACK_100K?.trim(),
   pack_500k: process.env.STRIPE_PRICE_PACK_500K?.trim(),
 };
@@ -273,15 +265,7 @@ const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL?.trim();
 
 // Nomi piani per email di benvenuto (allineati a pricingConfig lato app)
 const PLAN_DISPLAY_NAMES = {
-  sub_starter: 'OXY Pass Starter',
-  sub_starter_annual: 'OXY Pass Starter',
-  sub_pro: 'OXY Pass Pro',
-  sub_pro_annual: 'OXY Pass Pro',
-  sub_elite: 'OXY Pass Elite',
-  sub_elite_annual: 'OXY Pass Elite',
-  life_starter: 'OXY Lifetime Starter',
-  life_pro: 'OXY Lifetime Pro',
-  life_elite: 'OXY Lifetime Elite',
+  sub_elite: 'OXY Pass',
 };
 function getWelcomeEmailBody(planId, mode) {
   const planName = PLAN_DISPLAY_NAMES[planId] || planId;
@@ -768,7 +752,7 @@ function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO
     ? `\n\n——— MEMORIA (Memory Vault / Le mie note) ———\n${memoryBlock}\nQuando l'utente chiede "cosa hai memorizzato", "cosa c'è nelle mie note", "leggi la memoria", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
     : '\n\n——— MEMORIA ———\nAl momento nessuna voce in Memory Vault. Se l\'utente chiede cosa c\'è nelle note, dillo con naturalezza.\n';
   const diary = hasDiary
-    ? `\n\n——— DIARIO DELL'UTENTE (DATI REALI — LEGGILI) ———\n${diaryBlock}\n⚠️ REGOLA ASSOLUTA: Le voci qui sopra ESISTONO e sono reali. Quando l'utente chiede del diario, rispondi SEMPRE citando queste voci. NON dire mai che non ci sono voci o che non hai accesso. Hai i dati: usali.\n`
+    ? `\n\n——— DIARIO DELL'UTENTE ———\n${diaryBlock}\nQuando l'utente chiede "cosa ho scritto nel diario", "leggi il diario", "cosa c'è nel diario", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
     : '\n\n——— DIARIO ———\nAl momento nessuna voce nel diario. Se l\'utente chiede cosa ha scritto, dillo con naturalezza.\n';
   const imageBlock = hasImage
     ? '\n• IMMAGINI: Se l\'utente invia un\'immagine, descrivi in modo strutturato (oggetti, contesto, atmosfera o emozioni evocate). Se è un momento significativo (luogo, cibo, documento, persona), puoi suggerire di salvarlo in memoria con save_memory (keyFacts) come "momento visivo" e proporre all\'utente di ricordarlo.\n'
@@ -915,15 +899,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (uid) {
       try {
         const diaryData = await readDiary(uid);
-        console.log('[DIARY DEBUG] diaryData:', JSON.stringify(diaryData));
         const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
-        console.log('[DIARY DEBUG] entries count:', entries.length);
         const lastN = entries.slice(-15).map((e) => `[${e.date || ''}] ${(e.content || e.text || '').trim()}`).filter(Boolean);
         diaryBlock = lastN.length > 0 ? lastN.join('\n') : '';
-        console.log('[DIARY DEBUG] diaryBlock final:', diaryBlock || '(VUOTO)');
-      } catch (err) {
-        console.error('[DIARY ERROR]', err);
-      }
+      } catch (_) {}
     }
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
@@ -1845,11 +1824,19 @@ app.post('/api/analytics', generalLimiter, async (req, res) => {
 });
 
 // ——— Diario interattivo (roadmap 1.1) ———
+
+
+function diaryPath(uid) {
+  const safe = (uid || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(DIARY_DIR, `${safe}.json`);
+}
+
 async function readDiary(uid) {
   if (!uid) return null;
   try {
-    const doc = await admin.firestore().collection('diaries').doc(uid).get();
-    return doc.exists ? doc.data() : { themes: [], entries: [], progressSummary: '' };
+    const raw = await fs.readFile(diaryPath(uid), 'utf8');
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' ? data : null;
   } catch {
     return null;
   }
@@ -2631,6 +2618,7 @@ app.post('/api/billing/webhook', async (req, res) => {
 app.listen(PORT, '0.0.0.0', async () => {
   await ensureDataDir();
   await ensureMemoriesDir();
+  
   await ensureStoryStateDir();
   await ensureBillingDir();
   await ensureCreditsDir();

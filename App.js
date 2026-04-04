@@ -199,10 +199,15 @@ const STORAGE_KEYS = {
 const DEFAULT_AI_NAME = 'OXY';
 const HAS_CUSTOM_AI_NAME_FEATURE = false;
 
+// Voices allowed at launch: only one female + one male.
+// (UI e stato devono essere coerenti anche se in passato è stato salvato un'altra voce.)
+const LAUNCH_ALLOWED_VOICE_IDS = ['nova', 'onyx'];
 
-// Distribuzione: 'subscription' = abbonamento (Oxy Key nascosta, solo backend); 'one_time_purchase' = acquisto senza abbonamento (mostra Inserisci Oxy Key)
+
+// Distribuzione: app con sottoscrizione mensile + opzione Oxy Key personale.
+// Gli utenti con una Oxy Key valida ottengono accesso completo; gli altri devono abbonarsi.
 const APP_MODE = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_APP_MODE || 'subscription').toLowerCase();
-const SHOW_OXY_KEY_OPTION = APP_MODE === 'one_time_purchase';
+const SHOW_OXY_KEY_OPTION = true;
 const DOCS_EMAIL_AUTOSEND_UI = String(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_DOCS_EMAIL_AUTOSEND || '').trim() === 'true';
 // Data go-live per sconto lancio 50% primi 30 gg (impostare EXPO_PUBLIC_GO_LIVE_DATE in build produzione)
 const GO_LIVE_DATE_STR = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GO_LIVE_DATE) || '2026-03-15';
@@ -1263,6 +1268,7 @@ export default function App() {
         sharedAt: data.sharedAt || null,
       });
       // Transizione da non-pagato a pagato in questa sessione → mostriamo scelta voce poi Chat
+      const nowActive = !!data.active;
       if (nowActive && hadSeenNotPaidThisSessionRef.current) {
         hadSeenNotPaidThisSessionRef.current = false;
         setShowVoiceChoiceAfterPayment(true);
@@ -1305,6 +1311,7 @@ export default function App() {
 
   // Prodotto solo premium: nessun piano free.
   const isFreePlan = false;
+  const currentMaxMessageLength = hasOxyKey || hasGeminiKey ? 8000 : MAX_MESSAGE_LENGTH;
   const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
   const effectiveFlags = useMemo(() => {
     const planId = billingStatus?.active && billingStatus?.planId ? billingStatus.planId : null;
@@ -1594,7 +1601,7 @@ export default function App() {
           setCustomAiName(storedAiName.trim());
           setStoredAiName(storedAiName.trim());
         }
-        if (storedVoiceId && VOICE_OPTIONS.some((v) => v.id === storedVoiceId)) setVoiceId(storedVoiceId);
+        if (storedVoiceId && LAUNCH_ALLOWED_VOICE_IDS.includes(String(storedVoiceId))) setVoiceId(String(storedVoiceId));
         if (storedVoiceReply === 'true') setVoiceReplyMode(true);
         if (storedServer) {
           try {
@@ -1629,22 +1636,26 @@ export default function App() {
   }, [isLogged, userId]);
 
   // Oxy Key gate e persistenza USER_DATA quando utente autenticato (dopo onAuthStateChanged)
-  // In modalità subscription: verifica abbonamento/acquisto dal backend; se attivo non mostrare il gate
+  // In modalità subscription: se l'utente ha OxyKey valida, accesso completo gratuito; altrimenti verifica abbonamento
   useEffect(() => {
     if (!isLogged || !userId) return;
     (async () => {
       try {
         await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(userData));
-        if (SHOW_OXY_KEY_OPTION) {
-          const oxyKey = await getOxyKey();
-          if (oxyKey && isValidKeyFormat(oxyKey)) {
-            setHasOxyKey(true);
-          } else {
-            setShowOxyKeyGate(true);
-          }
+        const oxyKey = await getOxyKey();
+        if (oxyKey && isValidKeyFormat(oxyKey)) {
+          setHasOxyKey(true);
+          setShowOxyKeyGate(false);
           return;
         }
-        // Modalità subscription: verifica abbonamento/acquisto dal backend (o piano free)
+
+        if (SHOW_OXY_KEY_OPTION) {
+          setHasOxyKey(false);
+          setShowOxyKeyGate(true);
+          return;
+        }
+
+        // Modalità subscription: verifica abbonamento/acquisto dal backend
         const urlBase = (backendUrl || '').trim().replace(/\/$/, '');
         if (urlBase) {
           const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
@@ -1656,10 +1667,12 @@ export default function App() {
             const data = await res.json().catch(() => ({}));
             if (res.ok && data && data.active) {
               setHasOxyKey(true);
+              setShowOxyKeyGate(false);
               return;
             }
           }
         }
+
         setHasOxyKey(false);
         setShowOxyKeyGate(true);
       } catch (_) {
@@ -2296,9 +2309,9 @@ export default function App() {
 
       const header = `${t('cloud.docContextHeader')}\n\n`;
       const footer = `\n\n${t('cloud.docUserQueryHeader')}\n${query}`;
-      const maxDocsLen = Math.max(0, MAX_MESSAGE_LENGTH - header.length - footer.length - 20);
+      const maxDocsLen = Math.max(0, currentMaxMessageLength - header.length - footer.length - 20);
       const clippedDocs = docsBlock.length > maxDocsLen ? `${docsBlock.slice(0, maxDocsLen)}\n\n[...tagliato...]` : docsBlock;
-      const finalMessage = `${header}${clippedDocs}${footer}`.slice(0, MAX_MESSAGE_LENGTH);
+      const finalMessage = `${header}${clippedDocs}${footer}`.slice(0, currentMaxMessageLength);
 
       // invio come payload: in chat mostriamo solo la domanda, all'IA mandiamo contesto+snippets
       await sendMessageRef.current?.({ displayText: query, messageText: finalMessage });
@@ -2382,9 +2395,10 @@ export default function App() {
       setCustomAiName(name);
       await AsyncStorage.setItem(STORAGE_KEYS.CUSTOM_AI_NAME, name);
     }
-    if (regVoiceId != null && VOICE_OPTIONS.some((v) => v.id === regVoiceId)) {
-      setVoiceId(regVoiceId);
-      await AsyncStorage.setItem(STORAGE_KEYS.VOICE_ID, regVoiceId);
+    if (regVoiceId != null && LAUNCH_ALLOWED_VOICE_IDS.includes(String(regVoiceId))) {
+      const voiceToSave = String(regVoiceId);
+      setVoiceId(voiceToSave);
+      await AsyncStorage.setItem(STORAGE_KEYS.VOICE_ID, voiceToSave);
     }
     const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
     const history = await loadChatHistory(uid, idToken);
@@ -2413,7 +2427,7 @@ export default function App() {
     // Primo login senza aver mai scelto un piano: mostra "Come vuoi usare OXY?" (Abbonamento / Lifetime)
     const planKey = STORAGE_KEYS.HAS_CHOSEN_PLAN_PREFIX + uid;
     const hasChosenPlan = await AsyncStorage.getItem(planKey);
-    if (hasChosenPlan !== 'true') setShowPlanChoiceAfterSignup(true);
+    // if (hasChosenPlan !== 'true') setShowPlanChoiceAfterSignup(true); // Rimosso per tornare alla registrazione normale
     // Aggiorna stato billing al login (per payment gate e per rilevare pagamento appena completato)
     refreshBillingStatus();
   }, [refreshBillingStatus]);
@@ -2486,7 +2500,7 @@ export default function App() {
   const handleCameraVision = useCallback(async () => {
     const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
     if (SHOW_OXY_KEY_OPTION) {
-      if (!hasOxyKey && !hasGeminiKey) {
+      if (!hasOxyKey && !hasGeminiKey && !billingStatus.active) {
         setShowOxyKeyGate(true);
         Alert.alert(t('ui.oxyKeyRequiredTitle'), t('ui.oxyKeyRequiredBodyVision'));
         return;
@@ -2646,7 +2660,7 @@ export default function App() {
       await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(newUser));
       setUserData(newUser);
       setShowRegister(false);
-      setShowPlanChoiceAfterSignup(true);
+      // setShowPlanChoiceAfterSignup(true); // Rimosso per tornare alla registrazione normale
       handleAuthSuccess({ session, profile });
     } catch (err) {
       const fallbackMsg = t('register.error.body');
@@ -2922,14 +2936,14 @@ export default function App() {
   const inviaMessaggio = useCallback(async () => {
     if (!testo.trim() || staCaricando || sendInCooldown) return;
     const rawMessage = testo.trim();
-    if (rawMessage.length > MAX_MESSAGE_LENGTH) {
-      Alert.alert(t('ui.tooLongTitle'), t('ui.tooLongBody', { max: MAX_MESSAGE_LENGTH }));
+    if (rawMessage.length > currentMaxMessageLength) {
+      Alert.alert(t('ui.tooLongTitle'), t('ui.tooLongBody', { max: currentMaxMessageLength }));
       return;
     }
     const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
     // Gate accesso:
     if (SHOW_OXY_KEY_OPTION) {
-      if (!hasOxyKey && !hasGeminiKey) {
+      if (!hasOxyKey && !hasGeminiKey && !billingStatus.active) {
         setShowOxyKeyGate(true);
         Alert.alert(t('ui.oxyKeyRequiredTitle'), t('ui.oxyKeyRequiredBodySend'));
         return;
@@ -2937,6 +2951,12 @@ export default function App() {
     } else {
       if (!idToken) {
         Alert.alert(t('chat.errorTitle'), t('chat.authRequiredError'));
+        return;
+      }
+      // Controllo abbonamento attivo
+      if (!billingStatus.active) {
+        setPlanTypeChosen('subscription');
+        setShowPlanTierSelection(true);
         return;
       }
     }
@@ -3053,8 +3073,8 @@ export default function App() {
     if (!rawMessage && optionalMessageText == null) return;
     if (!rawMessageForAi) return;
     if (staCaricando || sendInCooldown) return;
-    if (rawMessageForAi.length > MAX_MESSAGE_LENGTH) {
-      Alert.alert(t('ui.tooLongTitle'), t('ui.tooLongBody', { max: MAX_MESSAGE_LENGTH }));
+    if (rawMessageForAi.length > currentMaxMessageLength) {
+      Alert.alert(t('ui.tooLongTitle'), t('ui.tooLongBody', { max: currentMaxMessageLength }));
       return;
     }
 
@@ -3227,7 +3247,7 @@ export default function App() {
 
     const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
     if (SHOW_OXY_KEY_OPTION) {
-      if (!hasOxyKey && !hasGeminiKey) {
+      if (!hasOxyKey && !hasGeminiKey && !billingStatus.active) {
         setShowOxyKeyGate(true);
         Alert.alert(t('ui.oxyKeyRequiredTitle'), t('ui.oxyKeyRequiredBodySend'));
         if (isTypedSend) restoreTypedInputIfEmpty();
@@ -3712,8 +3732,9 @@ export default function App() {
   })();
 
   // Schermata Starter / Pro / Elite (dopo tap Abbonamento o Lifetime)
-  const tierPlans = planTypeChosen ? PLANS.filter((p) => p.group === planTypeChosen) : [];
-  if (showPlanTierSelection && planTypeChosen && tierPlans.length > 0) {
+  const effectivePlanTypeChosen = planTypeChosen || 'subscription';
+  const tierPlans = PLANS.filter((p) => p.group === effectivePlanTypeChosen);
+  if (showPlanTierSelection && tierPlans.length > 0) {
     return (
       <ErrorBoundary>
         <SafeAreaProvider>
@@ -3768,54 +3789,54 @@ export default function App() {
     );
   }
 
-  // Payment gate: scelta piano full-screen (Abbonamento / Lifetime).
-  const showPlanChoice = (showPlanChoiceAfterSignup || (isLogged && !billingStatus.active)) && !planChoiceDismissedToBilling && !showPlanTierSelection;
-  if (showPlanChoice) {
-    if (isLogged && !billingStatus.active) hadSeenNotPaidThisSessionRef.current = true;
-    return (
-      <ErrorBoundary>
-        <SafeAreaProvider>
-          <LinearGradient colors={['#002b4d', '#002b4d']} style={{ flex: 1 }}>
-            <StatusBar barStyle="light-content" />
-            <SafeAreaView style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 24 }} edges={['top']}>
-              <View style={{ alignItems: 'center', marginBottom: 28 }}>
-                <OxyLogo large />
-              </View>
-              <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 24 }}>
-                {t('register.planChoiceTitle')}
-              </Text>
-              <>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(197,160,89,0.25)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#c5a059' }}
-                    onPress={async () => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      if (userId) AsyncStorage.setItem(STORAGE_KEYS.HAS_CHOSEN_PLAN_PREFIX + userId, 'true').catch(() => {});
-                      setShowPlanChoiceAfterSignup(false);
-                      setShowPlanTierSelection(true);
-                      setPlanTypeChosen('subscription');
-                    }}
-                  >
-                    <Text style={{ color: '#c5a059', fontWeight: '600', fontSize: 16 }}>{t('register.planSubscription')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ backgroundColor: 'rgba(197,160,89,0.25)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#c5a059' }}
-                    onPress={async () => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      if (userId) AsyncStorage.setItem(STORAGE_KEYS.HAS_CHOSEN_PLAN_PREFIX + userId, 'true').catch(() => {});
-                      setShowPlanChoiceAfterSignup(false);
-                      setShowPlanTierSelection(true);
-                      setPlanTypeChosen('lifetime');
-                    }}
-                  >
-                    <Text style={{ color: '#c5a059', fontWeight: '600', fontSize: 16 }}>{t('register.planLifetime')}</Text>
-                  </TouchableOpacity>
-                </>
-            </SafeAreaView>
-          </LinearGradient>
-        </SafeAreaProvider>
-      </ErrorBoundary>
-    );
-  }
+  // Payment gate: scelta piano full-screen (Abbonamento / Lifetime) - RIMOSSO
+  // const showPlanChoice = false; // Rimosso per tornare alla registrazione normale
+  // if (showPlanChoice) {
+  //   if (isLogged && !billingStatus.active) hadSeenNotPaidThisSessionRef.current = true;
+  //   return (
+  //     <ErrorBoundary>
+  //       <SafeAreaProvider>
+  //         <LinearGradient colors={['#002b4d', '#002b4d']} style={{ flex: 1 }}>
+  //           <StatusBar barStyle="light-content" />
+  //           <SafeAreaView style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 24 }} edges={['top']}>
+  //             <View style={{ alignItems: 'center', marginBottom: 28 }}>
+  //               <OxyLogo large />
+  //             </View>
+  //             <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 24 }}>
+  //               {t('register.planChoiceTitle')}
+  //             </Text>
+  //             <>
+  //                 <TouchableOpacity
+  //                   style={{ backgroundColor: 'rgba(197,160,89,0.25)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#c5a059' }}
+  //                   onPress={async () => {
+  //                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  //                     if (userId) AsyncStorage.setItem(STORAGE_KEYS.HAS_CHOSEN_PLAN_PREFIX + userId, 'true').catch(() => {});
+  //                     setShowPlanChoiceAfterSignup(false);
+  //                     setShowPlanTierSelection(true);
+  //                     setPlanTypeChosen('subscription');
+  //                   }}
+  //                 >
+  //                   <Text style={{ color: '#c5a059', fontWeight: '600', fontSize: 16 }}>{t('register.planSubscription')}</Text>
+  //                 </TouchableOpacity>
+  //                 <TouchableOpacity
+  //                   style={{ backgroundColor: 'rgba(197,160,89,0.25)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#c5a059' }}
+  //                   onPress={async () => {
+  //                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  //                     if (userId) AsyncStorage.setItem(STORAGE_KEYS.HAS_CHOSEN_PLAN_PREFIX + userId, 'true').catch(() => {});
+  //                     setShowPlanChoiceAfterSignup(false);
+  //                     setShowPlanTierSelection(true);
+  //                     setPlanTypeChosen('lifetime');
+  //                   }}
+  //                 >
+  //                   <Text style={{ color: '#c5a059', fontWeight: '600', fontSize: 16 }}>{t('register.planLifetime')}</Text>
+  //                 </TouchableOpacity>
+  //               </>
+  //           </SafeAreaView>
+  //         </LinearGradient>
+  //       </SafeAreaProvider>
+  //     </ErrorBoundary>
+  //   );
+  // }
 
   // Share gate disattivato.
   const showShareGateForFree = false;
@@ -4003,7 +4024,7 @@ export default function App() {
               <Text style={[styles.firstLaunchLanguageTitle, { marginBottom: 8 }]}>{t('register.stepVoiceTitle')}</Text>
               <Text style={[styles.firstLaunchLanguageSubtitle, { marginBottom: 20 }]}>{t('register.stepVoiceSubtitle')}</Text>
               <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-                {VOICE_OPTIONS.map((opt) => (
+                      {VOICE_OPTIONS.filter((opt) => opt.id === 'nova' || opt.id === 'onyx').map((opt) => (
                   <TouchableOpacity
                     key={opt.id}
                     onPress={() => {
@@ -4668,7 +4689,7 @@ export default function App() {
                           placeholderTextColor="rgba(255,255,255,0.38)"
                           value={inputMessage}
                           onChangeText={setInputMessage}
-                          maxLength={MAX_MESSAGE_LENGTH}
+                          maxLength={currentMaxMessageLength}
                           multiline
                           selectionColor="#c5a059"
                           onFocus={() => {
@@ -5068,19 +5089,11 @@ export default function App() {
                   ) : null}
 
                   <TouchableOpacity
-                    style={[styles.actionTileCompact, !effectiveFlags.stories && { opacity: 0.6 }]}
-                    activeOpacity={0.85}
-                    onPress={async () => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      if (effectiveFlags.stories) {
-                        setShowMenuModal(false);
-                        setShowStoriesModal(true);
-                        await refetchStoryState();
-                        const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-                        if (idToken) track(EVENTS.FEATURE_OPEN, { feature: 'stories' }, idToken);
-                      } else {
-                        onLockedFeatureTap();
-                      }
+                  style={[styles.actionTileCompact, !effectiveFlags.stories && { opacity: 0.6 }]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  Alert.alert(t('common.loading'), 'Questa funzione è in arrivo. Ti aggiorniamo appena disponibile.');
                     }}
                   >
                     <View style={styles.actionTileIconWrapCompact}>
@@ -5092,18 +5105,11 @@ export default function App() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionTileCompact, !effectiveFlags.community && { opacity: 0.6 }]}
-                    activeOpacity={0.85}
-                    onPress={async () => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      if (effectiveFlags.community) {
-                        setShowMenuModal(false);
-                        setShowCommunityModal(true);
-                        const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-                        if (idToken) track(EVENTS.FEATURE_OPEN, { feature: 'community' }, idToken);
-                      } else {
-                        onLockedFeatureTap();
-                      }
+                  style={[styles.actionTileCompact, !effectiveFlags.community && { opacity: 0.6 }]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  Alert.alert(t('common.loading'), 'Questa funzione è in arrivo. Ti aggiorniamo appena disponibile.');
                     }}
                   >
                     <View style={styles.actionTileIconWrapCompact}>
@@ -5232,7 +5238,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                    {VOICE_OPTIONS.map((opt) => (
+                    {VOICE_OPTIONS.filter((opt) => LAUNCH_ALLOWED_VOICE_IDS.includes(opt.id)).map((opt) => (
                       <View key={opt.id} style={[styles.settingsRow, { flexWrap: 'wrap', marginBottom: 12, alignItems: 'flex-start' }]}>
                         <TouchableOpacity
                           style={{ flex: 1, minWidth: '100%' }}
@@ -5538,7 +5544,22 @@ export default function App() {
                 </TouchableOpacity>
                 <Text style={[styles.menuModalTitle, styles.menuSubTitle]}>{t('oxykey.title')}</Text>
                 <ScrollView style={styles.menuTabScroll} contentContainerStyle={[styles.menuSettingsContent, { paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
-                  {billingStatus.active && billingStatus.mode === 'subscription' ? (
+                  {hasOxyKey || hasGeminiKey ? (
+                    <View style={styles.menuSectionBlock}>
+                      <Text style={[styles.settingsRowText, { lineHeight: 22, color: '#d1d1d1', marginBottom: 16 }]}>Hai una chiave OpenAI o Gemini valida: ora puoi usare Oxy senza sottoscrizione.</Text>
+                      <TouchableOpacity
+                        style={[styles.ctaBtn, { alignSelf: 'flex-start' }]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setMenuTab('impostazioni');
+                          setMenuSubView(null);
+                        }}
+                      >
+                        <Text style={styles.ctaBtnText}>{t('settings.oxyKeyEditRow')}</Text>
+                        <FontAwesome name="chevron-right" size={14} color="#c5a059" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : billingStatus.active && billingStatus.mode === 'subscription' ? (
                     <View style={styles.menuSectionBlock}>
                       <Text style={[styles.settingsRowText, { lineHeight: 22, color: '#d1d1d1', marginBottom: 16 }]}>{t('oxykey.includedInPlan')}</Text>
                       <TouchableOpacity
@@ -5809,60 +5830,7 @@ export default function App() {
                           )}
                         </View>
                       )}
-                      {/* Tab interni: Abbonamenti vs Lifetime */}
-                      <View style={{ flexDirection: 'row', marginTop: 8, marginBottom: 8, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.3)', padding: 2 }}>
-                        <TouchableOpacity
-                          style={{
-                            flex: 1,
-                            paddingVertical: 6,
-                            borderRadius: 999,
-                            backgroundColor: billingPlanView === 'subscription' ? 'rgba(197,160,89,0.2)' : 'transparent',
-                          }}
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setBillingPlanView('subscription');
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.settingsRowText,
-                              {
-                                textAlign: 'center',
-                                fontSize: 13,
-                                color: billingPlanView === 'subscription' ? '#c5a059' : '#d1d1d1',
-                              },
-                            ]}
-                          >
-                            {t('billing.tabSubscriptions')}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={{
-                            flex: 1,
-                            paddingVertical: 6,
-                            borderRadius: 999,
-                            backgroundColor: billingPlanView === 'lifetime' ? 'rgba(197,160,89,0.2)' : 'transparent',
-                          }}
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setBillingPlanView('lifetime');
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.settingsRowText,
-                              {
-                                textAlign: 'center',
-                                fontSize: 13,
-                                color: billingPlanView === 'lifetime' ? '#c5a059' : '#d1d1d1',
-                              },
-                            ]}
-                          >
-                            {t('billing.tabLifetime')}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
+                      {/* Abbonamento singolo: mostra solo il piano subscription */}
                       {billingPlanView === 'subscription' && (
                         <>
                           <Text style={[styles.settingsSectionTitle, { marginTop: 4, marginBottom: 12 }]}>{t('billing.subscriptionsSectionTitle')}</Text>
@@ -8229,7 +8197,7 @@ export default function App() {
                   placeholderTextColor="rgba(255,255,255,0.38)"
                   value={inputMessage}
                   onChangeText={setInputMessage}
-                  maxLength={MAX_MESSAGE_LENGTH}
+                  maxLength={currentMaxMessageLength}
                   multiline
                   selectionColor="#c5a059"
                   onFocus={() => {
@@ -8439,102 +8407,19 @@ export default function App() {
 
             {sorgenteSelezionata === 'locale' && (
               <View style={styles.configPanel}>
-                <Text style={[styles.configTitle, { color: '#d1d1d1' }]}>{t('cloud.localBackupTitle')}</Text>
-                <Text style={[styles.cloudSubtitle, { textAlign: 'center' }]}>{t('cloud.localBackupHint')}</Text>
-                <TouchableOpacity
-                  style={[styles.saveConfigBtn, cloudLocalExporting && styles.disabledBtn]}
-                  onPress={handleExportLocalBackup}
-                  disabled={cloudLocalExporting}
-                >
-                  <Text style={styles.saveConfigBtnText}>
-                    {cloudLocalExporting ? t('cloud.backupExporting') : t('cloud.exportBackupButton')}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.ctaBtnSecondary, { marginTop: 12 }]}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCloudImportOpen((v) => !v); }}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.ctaBtnText}>{t('cloud.importBackupButton')}</Text>
-                  <FontAwesome name={cloudImportOpen ? 'chevron-up' : 'chevron-down'} size={14} color="#c5a059" />
-                </TouchableOpacity>
-
-                {cloudImportOpen ? (
-                  <View style={{ marginTop: 12 }}>
-                    <TextInput
-                      style={[styles.settingsInputInline, { minHeight: 120, textAlignVertical: 'top' }]}
-                      placeholder={t('cloud.importBackupPlaceholder')}
-                      placeholderTextColor="#888"
-                      value={cloudImportPayload}
-                      onChangeText={setCloudImportPayload}
-                      multiline
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <TouchableOpacity
-                      style={[styles.ctaBtn, { marginTop: 10 }]}
-                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); handleImportLocalBackup(); }}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={styles.ctaBtnText}>{t('cloud.importBackupApplyButton')}</Text>
-                      <FontAwesome name="chevron-right" size={14} color="#c5a059" />
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-
-                <TouchableOpacity
-                  style={[styles.ctaBtnSecondary, { marginTop: 14, borderColor: 'rgba(197,160,89,0.35)' }]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    Alert.alert(
-                      t('cloud.clearChatCacheConfirmTitle'),
-                      t('cloud.clearChatCacheConfirmBody'),
-                      [
-                        { text: t('common.cancel'), style: 'cancel' },
-                        { text: t('common.ok'), onPress: () => clearLocalChatCacheAndReload() },
-                      ]
-                    );
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.ctaBtnText}>{t('cloud.clearChatCacheBtn')}</Text>
-                  <FontAwesome name="trash" size={14} color="#c5a059" />
-                </TouchableOpacity>
+                <Text style={[styles.configTitle, { color: '#d1d1d1', textAlign: 'center' }]}>{t('cloud.localBackupTitle')}</Text>
+                <Text style={[styles.cloudSubtitle, { textAlign: 'center', marginTop: 8 }]}>
+                  Questa funzione è in arrivo. Ti aggiorniamo appena disponibile.
+                </Text>
               </View>
             )}
 
             {sorgenteSelezionata === 'server' && (
               <View style={styles.configPanel}>
-                <Text style={[styles.configTitle, { color: '#d1d1d1' }]}>{t('cloud.serverConfigTitle')}</Text>
-                <TextInput
-                  style={styles.configInput}
-                  placeholder={t('cloud.serverHostPlaceholder')}
-                  value={serverConfig.host}
-                  onChangeText={(v) => setServerConfig({ ...serverConfig, host: v })}
-                />
-                <TextInput
-                  style={styles.configInput}
-                  placeholder={t('cloud.serverUsernamePlaceholder')}
-                  value={serverConfig.username}
-                  onChangeText={(v) => setServerConfig({ ...serverConfig, username: v })}
-                />
-                <TextInput
-                  style={styles.configInput}
-                  placeholder={t('cloud.serverTokenPlaceholder')}
-                  secureTextEntry
-                  value={serverConfig.token}
-                  onChangeText={(v) => setServerConfig({ ...serverConfig, token: v })}
-                />
-                <TouchableOpacity
-                  style={[styles.saveConfigBtn, cloudServerTesting && styles.disabledBtn]}
-                  onPress={handleCloudServerConnect}
-                  disabled={cloudServerTesting}
-                >
-                  <Text style={styles.saveConfigBtnText}>
-                    {cloudServerTesting ? t('cloud.serverTesting') : t('cloud.serverConnectButton')}
-                  </Text>
-                </TouchableOpacity>
+                <Text style={[styles.configTitle, { color: '#d1d1d1', textAlign: 'center' }]}>{t('cloud.serverConfigTitle')}</Text>
+                <Text style={[styles.cloudSubtitle, { textAlign: 'center', marginTop: 8 }]}>
+                  Questa funzione è in arrivo. Ti aggiorniamo appena disponibile.
+                </Text>
               </View>
             )}
           </ScrollView>
@@ -10264,6 +10149,7 @@ const styles = StyleSheet.create({
   },
   firstLaunchLanguageConfirmButton: {
     marginTop: 24,
+    marginBottom: 20,
     paddingVertical: 16,
     borderRadius: 12,
     backgroundColor: '#c5a059',
