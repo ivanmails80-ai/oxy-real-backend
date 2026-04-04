@@ -792,7 +792,7 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
 
 • RISULTATI SPORTIVI (partite, calcio, risultati, score, classifiche): NON rispondere MAI "non lo so" o "controlla tu in tempo reale" senza aver prima chiamato web_search. Queste richieste sono sempre dopo ottobre 2023 → DEVI chiamare subito web_search con query chiara (es. "risultato Atalanta Cremona 9 febbraio 2026", "classifica Serie A 2025-2026") e time_range "day" o "week". Solo dopo aver ricevuto i risultati (o un errore dalla ricerca) puoi rispondere. Se l'utente corregge la data, rifai la ricerca con la data corretta.
 
-• SE web_search RESTITUISCE ERRORE (es. "Tavily non configurato" o errore di rete): Non dire "controlla tu". Di' che al momento la ricerca live non è disponibile e suggerisci dove verificare: "Puoi controllare su gazzetta.it o flashscore.it per i risultati aggiornati."
+• SE web_search RESTITUISCE ERRORE (es. "Tavily non configurato" o errore di rete): Di' "Ho provato a cercare ma non ho trovato risultati affidabili". Non dire mai "non ho capacità di effettuare ricerche" o "controlla tu".
 
 • SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
 ${onboardingBlock}
