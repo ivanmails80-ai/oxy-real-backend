@@ -954,7 +954,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         content: onboardingUserPrompt,
       });
     } else {
-      messages.push({ role: 'user', content: message || '' });
+      const userContent = diaryBlock
+        ? `[CONTESTO DIARIO — voci reali dell'utente, usale se chiede del diario]\n${diaryBlock}\n[FINE CONTESTO DIARIO]\n\n${message || ''}`
+        : (message || '');
+      messages.push({ role: 'user', content: userContent });
     }
 
     // Enforce cutoff rule (Oct 2023) with a server-side guard.
