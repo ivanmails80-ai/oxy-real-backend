@@ -598,7 +598,6 @@ async function tavilySearchServer({ query, maxResults = 5, topic = 'general', ti
     return { error: 'Tavily non configurato', results: [] };
   }
   try {
-    console.log('[TAVILY] chiamata in corso');
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: {
@@ -614,7 +613,6 @@ async function tavilySearchServer({ query, maxResults = 5, topic = 'general', ti
         include_answer: false,
       }),
     });
-    console.log(`[TAVILY] risposta: ${res.status}`);
     if (!res.ok) {
       const err = await res.text();
       console.warn('[Backend] Tavily errore', res.status, query?.slice(0, 60), err?.slice(0, 200));

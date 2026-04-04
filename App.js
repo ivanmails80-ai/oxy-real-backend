@@ -3904,27 +3904,26 @@ export default function App() {
                 <OxyLogo large />
               </View>
               <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 14 }}>
-                Scegli come accedere a OXY
+                {t('register.keyChoiceTitle')}
               </Text>
               <Text style={{ color: '#b0b0c0', fontSize: 15, textAlign: 'center', marginBottom: 24 }}>
-                Usa la tua chiave Gemini o OpenAI, oppure abbonati a OXY Pass.
+                {t('register.keyChoiceSubtitle')}
               </Text>
               <TouchableOpacity
                 style={{ backgroundColor: 'rgba(93,153,197,0.16)', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, borderWidth: 1, borderColor: '#5a9fc5', marginBottom: 14 }}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setOxyKeyError('');
-                  setGeminiKeyError('');
-                  setShowOxyKeyGate(true);
+                  setShowMenuModal(true);
+                  setMenuTab('impostazioni');
                 }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Usa la tua chiave Gemini</Text>
-                    <Text style={{ color: '#d0d0e0', fontSize: 13 }}>Gratis</Text>
+                    <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>{t('register.useGeminiKey')}</Text>
+                    <Text style={{ color: '#d0d0e0', fontSize: 13 }}>{t('register.freeLabel')}</Text>
                   </View>
                   <View style={{ backgroundColor: '#3b7ea1', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Consigliata</Text>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{t('register.recommendedLabel')}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -3937,19 +3936,18 @@ export default function App() {
                   setShowOxyKeyGate(true);
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Usa la tua chiave OpenAI</Text>
-                <Text style={{ color: '#d0d0e0', fontSize: 13 }}>Inserisci la tua API Key OpenAI per continuare</Text>
+                <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>{t('register.useOpenAIKey')}</Text>
+                <Text style={{ color: '#d0d0e0', fontSize: 13 }}>{t('register.geminiKeyDescription')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={{ backgroundColor: '#c5a059', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, marginBottom: 14 }}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setPlanTypeChosen('subscription');
-                  setShowPlanTierSelection(true);
+                  handleCheckout('sub_elite');
                 }}
               >
-                <Text style={{ color: '#0a0a0a', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>Abbonati a €7,99/mese</Text>
-                <Text style={{ color: '#0a0a0a', fontSize: 13 }}>Sblocca OXY Pass con accesso completo</Text>
+                <Text style={{ color: '#0a0a0a', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>{t('register.subscribeElite')}</Text>
+                <Text style={{ color: '#0a0a0a', fontSize: 13 }}>{t('register.subscribeEliteDescription')}</Text>
               </TouchableOpacity>
             </SafeAreaView>
           </LinearGradient>
@@ -5848,9 +5846,37 @@ export default function App() {
                                 : t('billing.usageLabelNoLimit', { used: billingStatus.usage.used }))}
                           </Text>
                           {billingStatus.usage.tokensUsed != null && billingStatus.usage.tokensUsed >= 0 && (
-                            <Text style={[styles.settingsRowText, { fontSize: 13, color: '#c5a059', marginBottom: 6 }]}>
-                              {t('billing.usageTokensLabel', { count: billingStatus.usage.tokensUsed })}
-                            </Text>
+                            <>
+                              <Text style={[styles.settingsRowText, { fontSize: 13, color: '#c5a059', marginBottom: 6 }]}>
+                                {t('billing.usageTokensLabel', { count: billingStatus.usage.tokensUsed })}
+                              </Text>
+                              <View
+                                style={{
+                                  height: 8,
+                                  borderRadius: 4,
+                                  backgroundColor: 'rgba(255,255,255,0.1)',
+                                  overflow: 'hidden',
+                                  marginBottom: 12,
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    width: `${Math.min(100, (billingStatus.usage.tokensUsed / 150000) * 100)}%`,
+                                    borderRadius: 4,
+                                    backgroundColor: (() => {
+                                      const pct = (billingStatus.usage.tokensUsed / 150000) * 100;
+                                      if (pct >= 90) return '#c94a4a';
+                                      if (pct >= 70) return '#c5a059';
+                                      return '#5a9e5a';
+                                    })(),
+                                  }}
+                                />
+                              </View>
+                            </>
                           )}
                           {billingStatus.usage?.tokenBalance != null && billingStatus.usage.tokenBalance > 0 && (
                             <Text style={[styles.settingsRowText, { fontSize: 13, color: '#5a9e5a', marginBottom: 6 }]}>
@@ -6016,89 +6042,7 @@ export default function App() {
                         </>
                       )}
 
-                      {billingPlanView === 'lifetime' && (
-                        <>
-                          <Text style={[styles.settingsSectionTitle, { marginTop: 16, marginBottom: 12 }]}>{t('billing.lifetimeSectionTitle')}</Text>
-                          <Text style={[styles.settingsRowText, { marginBottom: 12, fontSize: 13, color: '#d1d1d1' }]}>
-                            {t('billing.lifetimeIntro')}
-                          </Text>
-                          {PLANS.filter((p) => p.group === 'lifetime').map((plan) => {
-                        const isActiveLife =
-                          billingStatus.active &&
-                          billingStatus.mode === 'payment' &&
-                          billingStatus.planId === plan.id;
-                        const upgradeTarget = plan.upgradeTargetId ? PLANS.find((p) => p.id === plan.upgradeTargetId) : null;
-                        const planName = t(`pricing.plans.${plan.id}.name`);
-                        const planDescription = t(`pricing.plans.${plan.id}.description`);
-                        const lifeTierLabel = plan.id.includes('elite') ? 'LIFETIME ELITE' : plan.id.includes('pro') ? 'LIFETIME PRO' : 'LIFETIME STARTER';
-                        return (
-                        <View
-                          key={plan.id}
-                          style={[
-                            styles.billingPlanCard,
-                            { flexDirection: 'column', alignItems: 'flex-start' },
-                            isActiveLife && styles.activePlanBox,
-                          ]}
-                        >
-                          <Text style={styles.billingPlanCardLabel}>{lifeTierLabel}</Text>
-                          <Text style={[styles.settingsRowText, { fontWeight: '600' }]}>
-                            {planName}
-                            {isActiveLife ? ` ${t('billing.lifetimeActiveSuffix')}` : ''}
-                          </Text>
-                          <Text style={[styles.settingsRowText, { marginTop: 2, color: '#c5a059' }]}>
-                            {daysLeftLaunchDiscount > 0
-                              ? `${getLaunchDiscountPrice(plan.suggestedPrice)} ${CURRENCY_DEFAULT}`
-                              : `${plan.suggestedPrice.toFixed(2).replace('.', ',')} ${CURRENCY_DEFAULT}`} {t('billing.oneTime')}
-                          </Text>
-                          <Text style={[styles.settingsRowText, { marginTop: 4, fontSize: 13, color: '#d1d1d1' }]}>
-                            {planDescription}
-                          </Text>
-                          <Text style={[styles.settingsRowText, { marginTop: 4, fontSize: 12, color: '#888' }]}>
-                            {t('billing.lifetimeKeyHint')}
-                          </Text>
-                          {/* CTA acquisto Lifetime sempre visibile */}
-                          <TouchableOpacity
-                            style={[styles.ctaBtn, { marginTop: 10, alignSelf: 'stretch' }]}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                              openCheckoutForPlan(plan.id);
-                            }}
-                          >
-                            <Text style={styles.ctaBtnText}>{t('billing.buyLifetimeCta', { planName })}</Text>
-                            <FontAwesome name="chevron-right" size={14} color="#c5a059" />
-                          </TouchableOpacity>
-                          {isActiveLife && plan.upgradeTargetId && plan.upgradePricing ? (
-                            <>
-                              <TouchableOpacity
-                                style={[styles.ctaBtn, { marginTop: 10, alignSelf: 'stretch' }]}
-                                onPress={() => {
-                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                  const targetId = plan.upgradeTargetId || plan.id;
-                                  openCheckoutForPlan(targetId);
-                                }}
-                              >
-                                <Text style={styles.ctaBtnText}>
-                                  {t('billing.upgradeLifetimeCta', { price: daysLeftLaunchDiscount > 0 ? String(getLaunchDiscountPrice(plan.upgradePricing.difference)) : plan.upgradePricing.difference.toFixed(2).replace('.', ','), currency: CURRENCY_DEFAULT })}
-                                </Text>
-                                <FontAwesome name="chevron-right" size={14} color="#c5a059" />
-                              </TouchableOpacity>
-                              <Text style={[styles.settingsRowText, { marginTop: 4, fontSize: 12, color: '#888' }]}>
-                                {t('billing.upgradeLifetimeExplainer')}
-                              </Text>
-                              <Text style={[styles.settingsRowText, { marginTop: 2, fontSize: 12, color: '#888' }]}>
-                                {t('billing.upgradeLifetimeExample', {
-                                  fromPrice: String(daysLeftLaunchDiscount > 0 ? getLaunchDiscountPrice(plan.suggestedPrice) : Math.round(plan.suggestedPrice)),
-                                  toPrice: upgradeTarget ? String(daysLeftLaunchDiscount > 0 ? getLaunchDiscountPrice(upgradeTarget.suggestedPrice) : Math.round(upgradeTarget.suggestedPrice)) : '',
-                                  diffPrice: String(daysLeftLaunchDiscount > 0 ? getLaunchDiscountPrice(plan.upgradePricing.difference) : Math.round(plan.upgradePricing.difference)),
-                                })}
-                              </Text>
-                            </>
-                          ) : null}
-                        </View>
-                        );
-                          })}
-                        </>
-                      )}
+
                     </>
                   ) : (
                     <>
