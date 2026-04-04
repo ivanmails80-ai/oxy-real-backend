@@ -3056,6 +3056,14 @@ export default function App() {
     }
   }, [testo, staCaricando, sendInCooldown, moduloAttivo, userData, userId, language, chatHistory, ttsEnabled, backendUrl, stickyBadge, playOxyVoice]);
 
+  /** Inizia una nuova chat svuotando la cronologia messaggi (non cancella memoria o diario) */
+  const startNewChat = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setChatHistory([]);
+    setInputMessage('');
+    // Non cancellare memoria o diario - solo la cronologia chat
+  }, []);
+
   /** Invia messaggio (da testo digitato o da optionalMessageText in modalità voce). Se forceVoiceReply=true o voiceReplyMode attiva, riproduce la risposta con TTS. */
   const sendMessage = useCallback(async (optionalMessageText, forceVoiceReply = false) => {
     const doTts = forceVoiceReply || voiceReplyMode;
@@ -4747,6 +4755,13 @@ export default function App() {
                           accessibilityLabel={t('chat.actionsLabel')}
                         >
                           <FontAwesome name="plus" size={22} color="#c5a059" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.superBarCamera, styles.superBarPlus]}
+                          onPress={startNewChat}
+                          accessibilityLabel={t('chat.newChat')}
+                        >
+                          <FontAwesome name="refresh" size={20} color="#c5a059" />
                         </TouchableOpacity>
                         <TextInput
                           ref={chatInputRef}
