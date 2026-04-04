@@ -597,28 +597,35 @@ async function tavilySearchServer({ query, maxResults = 5, topic = 'general', ti
     console.warn('[Backend] Tavily: API key non impostata (TAVILY_API_KEY). Aggiungila in Environment su Render.');
     return { error: 'Tavily non configurato', results: [] };
   }
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${TAVILY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      query,
-      max_results: maxResults,
-      topic,
-      search_depth: 'advanced',
-      ...(timeRange && { time_range: timeRange }),
-      include_answer: false,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    console.warn('[Backend] Tavily errore', res.status, query?.slice(0, 60), err?.slice(0, 200));
-    return { error: `Tavily ${res.status}`, results: [] };
+  try {
+    console.log('[TAVILY] chiamata in corso');
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TAVILY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        query,
+        max_results: maxResults,
+        topic,
+        search_depth: 'advanced',
+        ...(timeRange && { time_range: timeRange }),
+        include_answer: false,
+      }),
+    });
+    console.log(`[TAVILY] risposta: ${res.status}`);
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn('[Backend] Tavily errore', res.status, query?.slice(0, 60), err?.slice(0, 200));
+      return { error: `Tavily ${res.status}`, results: [] };
+    }
+    const data = await res.json();
+    return { results: data?.results || [] };
+  } catch (error) {
+    console.error('[TAVILY] errore:', error);
+    return { error: 'Tavily errore interno', results: [] };
   }
-  const data = await res.json();
-  return { results: data?.results || [] };
 }
 
 // Stripe client dinamico (per evitare crash se il pacchetto non è installato)
