@@ -25,7 +25,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 
 ## Endpoint
 
-- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo utile con `moduleName: "Studio"`: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`.
+- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo utile con `moduleName: "Studio"`: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **Studio**, il blocco system dedicato (in coda, con OVERRIDE operativo) ha priorità sul tono amichevole del prompt base.
 - `GET /api/chat/history` — cronologia chat. Header `Authorization: Bearer <idToken>` (o query `idToken`). Risposta: `{ messages }`.
 - `POST /api/chat/messages` — salvataggio messaggio. Header o body `idToken`, body `role`, `content`. Risposta: `{ ok: true }`.
 - `GET /health` — controllo stato.
