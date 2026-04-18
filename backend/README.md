@@ -17,7 +17,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
    npm install
    npm start
    ```
-4. **Log chat Studio (opzionale)**: con `moduleName: "Studio"`, il server logga in console una riga di verifica (`study_level` raw/normalized, presenza della riga `Study-level context:`) e il **system prompt completo** (delimitatori `FINAL_SYSTEM_PROMPT_*`). Per disattivare solo il dump lungo: `OXY_LOG_STUDIO_PROMPT=0` (default: log completo).
+4. **Log chat Studio (opzionale)**: con `moduleName: "Studio"`, il server logga in console una riga di verifica (`study_level` raw/normalized, presenza della riga `Current study level:`) e il **system prompt completo** (delimitatori `FINAL_SYSTEM_PROMPT_*`). Per disattivare solo il dump lungo: `OXY_LOG_STUDIO_PROMPT=0` (default: log completo). Test locale prompt: `node scripts/test-studio-prompt.mjs`.
 
 5. Nell’app (`.env` nella root del progetto Expo) imposta:
    ```bash
@@ -27,7 +27,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 
 ## Endpoint
 
-- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo utile con `moduleName: "Studio"`: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **Studio**, il blocco system dedicato (in coda, con OVERRIDE operativo) ha priorità sul tono amichevole del prompt base.
+- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo utile con `moduleName: "Studio"`: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **`moduleName: "Studio"`** il system message è **solo** il prompt tutor operativo (lingua, nome, livello, OVERRIDE, regole Studio) più un estratto essenziale della Memory Vault — **non** si usa il prompt base OXY Real (niente tono “amico/amica”, conoscenza app, ecc.).
 - `GET /api/chat/history` — cronologia chat. Header `Authorization: Bearer <idToken>` (o query `idToken`). Risposta: `{ messages }`.
 - `POST /api/chat/messages` — salvataggio messaggio. Header o body `idToken`, body `role`, `content`. Risposta: `{ ok: true }`.
 - `GET /health` — controllo stato.

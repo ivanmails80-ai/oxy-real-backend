@@ -21,7 +21,7 @@ import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 import * as fsSync from 'fs';
-import { normalizeStudyLevel, buildStudioGuidedSystemBlock } from './oxyGuidedModes.js';
+import { normalizeStudyLevel, buildStudioExclusiveFullPrompt } from './oxyGuidedModes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Storage locale (P0: su Render senza Persistent Disk è effimero).
@@ -751,7 +751,7 @@ IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system
 `;
 }
 
-function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel, studioAppendix }) {
+function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
   const hasMem = !!(memoryBlock && memoryBlock.trim());
   const hasDiary = !!(diaryBlock && diaryBlock.trim());
   const mem = hasMem
@@ -766,20 +766,11 @@ function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO
   const nameLine = (userName && userName.length > 0)
     ? `\nL'utente si chiama ${userName}. Usa il suo nome quando appropriato (saluti, chiusure, tono personale).\n`
     : '';
-  const personalityLine = studioAppendix
-    ? 'Personalità (con Studio attivo): diretta, operativa, da tutor sotto pressione — vince sulla personalità vocale se c\'è conflitto; segui la sezione MODALITÀ STUDIO in coda.'
-    : (voiceId && VOICE_PERSONALITY_PROMPTS[voiceId])
-      ? VOICE_PERSONALITY_PROMPTS[voiceId]
-      : 'Personalità: amichevole, coerente, orientata alla chiarezza e ai passi concreti.';
+  const personalityLine = (voiceId && VOICE_PERSONALITY_PROMPTS[voiceId])
+    ? VOICE_PERSONALITY_PROMPTS[voiceId]
+    : 'Personalità: amichevole, coerente, orientata alla chiarezza e ai passi concreti.';
   const onboardingBlock = initialOnboarding ? getOnboardingSystemBlock(language) : '';
-  const regoleFisseTone = studioAppendix
-    ? `——— REGOLE FISSE (NON IGNORARE) ———
-• MODALITÀ STUDIO — PRIORITÀ: La sezione "MODALITÀ STUDIO" alla fine di questo prompt sovrascrive istruzioni di tono amichevole/passivo, attesa o liste generiche sopra o qui se in conflitto.
-• NIENTE RAFFICHE DI DOMANDE: In Studio puoi fare al massimo la sequenza prevista da MODALITÀ STUDIO (es. una domanda chiave sull'esame), poi esecuzione.
-• NIENTE CHIUSURE DA ASSISTENTE: Niente inviti servili a "fammi sapere se serve altro"; chiudi in modo netto come da Studio.
-• IDENTITÀ DELL'UTENTE: Basati su chi hai davanti (usa la memoria). Parla di LUI/LEI, non di te.
-`
-    : `——— REGOLE FISSE (NON IGNORARE) ———
+  const regoleFisseTone = `——— REGOLE FISSE (NON IGNORARE) ———
 • COME UN AMICO/AMICA: Sii amichevole e morbida nelle risposte. Un'amica fidata o un amico fidato: calda, presente, mai fredda o da manuale.
 • NIENTE INTERROGATORI: Non fare raffiche di domande. Non "sintonizzarti" con domande su obiettivi o personalità. Capisci l'umano man mano che si scrivono: dalla conversazione, non da un questionario.
 • SINCERA MA MORBIDA: Sii sincera e diretta, ma con tatto. Niente "Certamente", niente "Sono qui per aiutarti" da assistente. Parla come parlerebbe un amico vero.
@@ -814,7 +805,6 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
 • SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
 ${onboardingBlock}
 ${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, Oxy Key, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
-${studioAppendix ? `\n\n——— MODALITÀ STUDIO ———\n${studioAppendix}\n` : ''}
 Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
 }
 
@@ -944,13 +934,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     const studyLevelNorm = normalizeStudyLevel(studyLevelRaw);
     const intentAnchor = typeof intentAnchorRaw === 'string' ? intentAnchorRaw.trim().slice(0, 160) : '';
     const isStudioModule = String(moduleName || '').trim() === 'Studio';
-    const studioAppendix = isStudioModule
-      ? buildStudioGuidedSystemBlock({
-        language: language || 'it',
-        studyLevel: studyLevelNorm,
-        intentAnchor,
-      })
-      : '';
+    const userNameTrim = typeof userName === 'string' ? userName.trim() : '';
+    const memoryEssentialForStudio = memoryBlock && String(memoryBlock).trim() ? String(memoryBlock).trim() : '';
     // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
@@ -958,35 +943,42 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       chatModel = getChatModelForPlan(billingForModel?.planId, useTokenPack);
     }
     const messages = [];
-    const systemContent = buildOxySystemPrompt({
-      customAiName: customAiName || 'OXY',
-      voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
-      userName: typeof userName === 'string' ? userName.trim() : '',
-      nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
-      dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
-      language: language || 'it',
-      moduleName: moduleName || 'default',
-      memoryBlock,
-      diaryBlock: diaryBlock || undefined,
-      hasImage: !!imageBase64,
-      initialOnboarding: isInitialMessage,
-      chatModel,
-      studioAppendix,
-    });
+    const systemContent = isStudioModule
+      ? buildStudioExclusiveFullPrompt({
+        language: language || 'it',
+        userName: userNameTrim,
+        studyLevel: studyLevelNorm,
+        memoryEssential: memoryEssentialForStudio,
+        intentAnchor,
+      })
+      : buildOxySystemPrompt({
+        customAiName: customAiName || 'OXY',
+        voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
+        userName: userNameTrim,
+        nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
+        dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
+        language: language || 'it',
+        moduleName: moduleName || 'default',
+        memoryBlock,
+        diaryBlock: diaryBlock || undefined,
+        hasImage: !!imageBase64,
+        initialOnboarding: isInitialMessage,
+        chatModel,
+      });
     messages.push({ role: 'system', content: systemContent });
 
     if (isStudioModule) {
-      const studyLineNeedle = `Study-level context: ${studyLevelNorm}.`;
+      const studyLineNeedle = `Current study level: ${studyLevelNorm}.`;
       const studyGuardPresent = systemContent.includes(studyLineNeedle);
       console.log(
-        '[OXY Studio] study_level raw=%s normalized=%s studyLevelGuard_in_prompt=%s prompt_chars=%s',
+        '[OXY Studio] study_level raw=%s normalized=%s studio_level_header_in_prompt=%s prompt_chars=%s',
         studyLevelRaw === undefined || studyLevelRaw === null ? '(missing)' : String(studyLevelRaw),
         studyLevelNorm,
         studyGuardPresent,
         String(systemContent || '').length
       );
       if (!studyGuardPresent) {
-        console.warn('[OXY Studio] expected studyLevelGuard line not found; check prompt assembly.');
+        console.warn('[OXY Studio] expected "Current study level:" header not found; check prompt assembly.');
       }
       if (process.env.OXY_LOG_STUDIO_PROMPT !== '0') {
         console.log('[OXY Studio] FINAL_SYSTEM_PROMPT_START');

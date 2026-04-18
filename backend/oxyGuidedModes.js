@@ -1,6 +1,6 @@
 /**
  * Modalità guidate OXY — allineato a LURK (`src/lib/oxy-guided-modes.ts` + `src/app/api/oxy-chat/route.ts`).
- * Usato dal backend OXY Real per `moduleName === "Studio"`.
+ * Per `moduleName === "Studio"` su OXY Real si usa **solo** `buildStudioExclusiveFullPrompt` (nessun prompt base).
  */
 
 const OXY_GUIDED_MODE_KEYS = ['studio', 'lavoro', 'coach', 'genius', 'business', 'social'];
@@ -79,14 +79,23 @@ function languageLabelForGuided(lang) {
 /** Ha priorità sul tono "amico/amica" e su regole passive del prompt base. */
 const STUDIO_OVERRIDE_PREFIX = `OVERRIDE: Ignore any previous instruction about being gentle or asking what the user needs. You are in STUDIO MODE. Do not give generic advice lists. Do not tell the user what to do — DO it with them. First ask ONE question: when is the exam. Then build a tight action plan together. Max 5 bullets, split by Now / Today / Tomorrow. Start immediately.`;
 
+const STUDIO_MEMORY_MAX = 2500;
+
+function trimMemoryEssential(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  return t.length > STUDIO_MEMORY_MAX ? `${t.slice(0, STUDIO_MEMORY_MAX)}\n[memory context truncated]` : t;
+}
+
 /**
- * Blocco system per Studio — stesso testo della route LURK `oxy-chat` (guidedMode studio),
- * con "OXY Real" al posto di "LURK", più OVERRIDE prioritario in testa.
+ * System prompt **esclusivo** per Studio: niente prompt base OXY Real.
+ * Ordine: intestazione coach → OVERRIDE → corpo tutor → memoria essenziale (se presente).
  */
-function buildStudioGuidedSystemBlock({ language, studyLevel, intentAnchor }) {
+function buildStudioExclusiveFullPrompt({ language, userName, studyLevel, memoryEssential, intentAnchor }) {
   const languageLabel = languageLabelForGuided(language);
-  /** Sempre uno dei token API (evita valori inattesi dal body). */
   const level = normalizeStudyLevel(studyLevel);
+  const workingWith = (userName && String(userName).trim()) ? String(userName).trim() : 'the user';
+
   const guidedAddon = getOxyGuidedModeSystemAddon('studio');
 
   const guidedCommonGuard = `Common guided policy (STUDIO; coerente con OVERRIDE sopra):
@@ -95,8 +104,7 @@ function buildStudioGuidedSystemBlock({ language, studyLevel, intentAnchor }) {
 - Keep output compact and non-redundant.
 - Keep conversational continuity: if follow-up turns stay on the same topic, continue without reframing from zero.`;
 
-  const studyLevelGuard = `Study-level context: ${level}.
-Adapt complexity, examples, and vocabulary to this level.
+  const depthGuard = `Adapt depth, examples, and vocabulary to the study level stated in the header above.
 If study level is unknown, ask exactly one concise classification question only after giving a usable first micro-plan.`;
 
   const continuityGuard = intentAnchor
@@ -110,25 +118,27 @@ Do not restart from scratch if the user remains on this thread; extend the curre
 - Prioritize recall practice and likely exam questions over passive reading.
 - If topic and deadline are known, do not ask discovery questions.`;
 
-  const workExecutionGuard = '';
-  const coachStarterGuard = '';
+  const mem = trimMemoryEssential(memoryEssential || '');
+  const memorySection = mem
+    ? `\n\n——— MEMORY (essential context only; use if relevant, do not invent beyond this) ———\n${mem}\n`
+    : '';
 
-  return `${STUDIO_OVERRIDE_PREFIX}
-
-You are OXY on OXY Real. Always answer in ${languageLabel}. Never switch language.
-Practical, assertive, professional. Avoid generic assistant disclaimers.
-${guidedAddon}
+  const core = `${guidedAddon}
 ${guidedCommonGuard}
-${studyLevelGuard}
+${depthGuard}
 ${continuityGuard}
 Hard brevity policy:
 - Keep replies concise by default.
 - Prefer 3-5 bullets or 2 short paragraphs max.
 - Avoid long preambles, summaries, and repetition.
 ${studioExecutionGuard}
-${workExecutionGuard}
-${coachStarterGuard}
 Do not interrogate the user. Ask at most one clarifying question, and only when absolutely necessary to avoid a wrong answer.`;
+
+  return `You are OXY, a focused study coach. Always answer in ${languageLabel}. You are working with ${workingWith}. Current study level: ${level}.
+
+${STUDIO_OVERRIDE_PREFIX}
+
+${core}${memorySection}`;
 }
 
 export {
@@ -137,5 +147,5 @@ export {
   getOxyGuidedModeSystemAddon,
   STUDIO_STUDY_LEVELS,
   normalizeStudyLevel,
-  buildStudioGuidedSystemBlock,
+  buildStudioExclusiveFullPrompt,
 };
