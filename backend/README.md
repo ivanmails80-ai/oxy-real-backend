@@ -17,7 +17,9 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
    npm install
    npm start
    ```
-4. Nell’app (`.env` nella root del progetto Expo) imposta:
+4. **Log chat Studio (opzionale)**: con `moduleName: "Studio"`, il server logga in console una riga di verifica (`study_level` raw/normalized, presenza della riga `Study-level context:`) e il **system prompt completo** (delimitatori `FINAL_SYSTEM_PROMPT_*`). Per disattivare solo il dump lungo: `OXY_LOG_STUDIO_PROMPT=0` (default: log completo).
+
+5. Nell’app (`.env` nella root del progetto Expo) imposta:
    ```bash
    EXPO_PUBLIC_BACKEND_URL=http://TUO_INDIRIZZO:3030
    ```

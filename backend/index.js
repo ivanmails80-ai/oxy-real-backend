@@ -975,6 +975,26 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     });
     messages.push({ role: 'system', content: systemContent });
 
+    if (isStudioModule) {
+      const studyLineNeedle = `Study-level context: ${studyLevelNorm}.`;
+      const studyGuardPresent = systemContent.includes(studyLineNeedle);
+      console.log(
+        '[OXY Studio] study_level raw=%s normalized=%s studyLevelGuard_in_prompt=%s prompt_chars=%s',
+        studyLevelRaw === undefined || studyLevelRaw === null ? '(missing)' : String(studyLevelRaw),
+        studyLevelNorm,
+        studyGuardPresent,
+        String(systemContent || '').length
+      );
+      if (!studyGuardPresent) {
+        console.warn('[OXY Studio] expected studyLevelGuard line not found; check prompt assembly.');
+      }
+      if (process.env.OXY_LOG_STUDIO_PROMPT !== '0') {
+        console.log('[OXY Studio] FINAL_SYSTEM_PROMPT_START');
+        console.log(systemContent);
+        console.log('[OXY Studio] FINAL_SYSTEM_PROMPT_END');
+      }
+    }
+
     if (Array.isArray(history) && history.length > 0) {
       for (const m of history) {
         if (m.role === 'user' || m.role === 'assistant') messages.push({ role: m.role, content: m.content || '' });

@@ -85,6 +85,8 @@ const STUDIO_OVERRIDE_PREFIX = `OVERRIDE: Ignore any previous instruction about 
  */
 function buildStudioGuidedSystemBlock({ language, studyLevel, intentAnchor }) {
   const languageLabel = languageLabelForGuided(language);
+  /** Sempre uno dei token API (evita valori inattesi dal body). */
+  const level = normalizeStudyLevel(studyLevel);
   const guidedAddon = getOxyGuidedModeSystemAddon('studio');
 
   const guidedCommonGuard = `Common guided policy (STUDIO; coerente con OVERRIDE sopra):
@@ -93,7 +95,7 @@ function buildStudioGuidedSystemBlock({ language, studyLevel, intentAnchor }) {
 - Keep output compact and non-redundant.
 - Keep conversational continuity: if follow-up turns stay on the same topic, continue without reframing from zero.`;
 
-  const studyLevelGuard = `Study-level context: ${studyLevel}.
+  const studyLevelGuard = `Study-level context: ${level}.
 Adapt complexity, examples, and vocabulary to this level.
 If study level is unknown, ask exactly one concise classification question only after giving a usable first micro-plan.`;
 
