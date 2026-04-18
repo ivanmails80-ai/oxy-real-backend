@@ -21,6 +21,7 @@ import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 import * as fsSync from 'fs';
+import { normalizeStudyLevel, buildStudioGuidedSystemBlock } from './oxyGuidedModes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Storage locale (P0: su Render senza Persistent Disk è effimero).
@@ -750,7 +751,7 @@ IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system
 `;
 }
 
-function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
+function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel, studioAppendix }) {
   const hasMem = !!(memoryBlock && memoryBlock.trim());
   const hasDiary = !!(diaryBlock && diaryBlock.trim());
   const mem = hasMem
@@ -802,12 +803,30 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
 • SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
 ${onboardingBlock}
 ${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, Oxy Key, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
+${studioAppendix ? `\n\n——— MODALITÀ STUDIO ———\n${studioAppendix}\n` : ''}
 Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
 }
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { idToken, apiKey: clientApiKey, geminiApiKey: clientGeminiKey, history, message, imageBase64, language, moduleName, customAiName, voiceId, userName, nowStr, dateISO: dateISOInput, initialMessage } = req.body;
+    const {
+      idToken,
+      apiKey: clientApiKey,
+      geminiApiKey: clientGeminiKey,
+      history,
+      message,
+      imageBase64,
+      language,
+      moduleName,
+      customAiName,
+      voiceId,
+      userName,
+      nowStr,
+      dateISO: dateISOInput,
+      initialMessage,
+      study_level: studyLevelRaw,
+      intent_anchor: intentAnchorRaw,
+    } = req.body;
     const useGemini = isValidGeminiKey(clientGeminiKey);
     if (!idToken && !clientApiKey && !useGemini) {
       return res.status(400).json({ error: 'idToken, Oxy Key o chiave Gemini richiesti' });
@@ -911,6 +930,16 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
+    const studyLevelNorm = normalizeStudyLevel(studyLevelRaw);
+    const intentAnchor = typeof intentAnchorRaw === 'string' ? intentAnchorRaw.trim().slice(0, 160) : '';
+    const isStudioModule = String(moduleName || '').trim() === 'Studio';
+    const studioAppendix = isStudioModule
+      ? buildStudioGuidedSystemBlock({
+        language: language || 'it',
+        studyLevel: studyLevelNorm,
+        intentAnchor,
+      })
+      : '';
     // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
@@ -931,6 +960,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       hasImage: !!imageBase64,
       initialOnboarding: isInitialMessage,
       chatModel,
+      studioAppendix,
     });
     messages.push({ role: 'system', content: systemContent });
 
