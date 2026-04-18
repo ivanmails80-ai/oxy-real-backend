@@ -76,18 +76,20 @@ function languageLabelForGuided(lang) {
   return 'Italian';
 }
 
+/** Ha priorità sul tono "amico/amica" e su regole passive del prompt base. */
+const STUDIO_OVERRIDE_PREFIX = `OVERRIDE: Ignore any previous instruction about being gentle or asking what the user needs. You are in STUDIO MODE. Do not give generic advice lists. Do not tell the user what to do — DO it with them. First ask ONE question: when is the exam. Then build a tight action plan together. Max 5 bullets, split by Now / Today / Tomorrow. Start immediately.`;
+
 /**
  * Blocco system per Studio — stesso testo della route LURK `oxy-chat` (guidedMode studio),
- * con "OXY Real" al posto di "LURK".
+ * con "OXY Real" al posto di "LURK", più OVERRIDE prioritario in testa.
  */
 function buildStudioGuidedSystemBlock({ language, studyLevel, intentAnchor }) {
   const languageLabel = languageLabelForGuided(language);
   const guidedAddon = getOxyGuidedModeSystemAddon('studio');
 
-  const guidedCommonGuard = `Common guided policy (all modes):
-- First propose, then ask: always provide a usable concrete proposal before any question.
-- Never open with a clarification question.
-- At most one clarifying question total, and only after actionable guidance is already given.
+  const guidedCommonGuard = `Common guided policy (STUDIO; coerente con OVERRIDE sopra):
+- If exam date is still unknown, your first move may be exactly that one question (OVERRIDE); once you have it (or user refuses), switch to execution: tight plan, no extra discovery.
+- Otherwise: propose concrete steps first; at most one further clarifier only if blocking.
 - Keep output compact and non-redundant.
 - Keep conversational continuity: if follow-up turns stay on the same topic, continue without reframing from zero.`;
 
@@ -109,7 +111,9 @@ Do not restart from scratch if the user remains on this thread; extend the curre
   const workExecutionGuard = '';
   const coachStarterGuard = '';
 
-  return `You are OXY on OXY Real. Always answer in ${languageLabel}. Never switch language.
+  return `${STUDIO_OVERRIDE_PREFIX}
+
+You are OXY on OXY Real. Always answer in ${languageLabel}. Never switch language.
 Practical, assertive, professional. Avoid generic assistant disclaimers.
 ${guidedAddon}
 ${guidedCommonGuard}
