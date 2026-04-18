@@ -17,7 +17,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
    npm install
    npm start
    ```
-4. **Log chat Studio (opzionale)**: con `moduleName: "Studio"`, il server logga in console una riga di verifica (`study_level` raw/normalized, presenza della riga `Current study level:`) e il **system prompt completo** (delimitatori `FINAL_SYSTEM_PROMPT_*`). Per disattivare solo il dump lungo: `OXY_LOG_STUDIO_PROMPT=0` (default: log completo). Test locale prompt: `node scripts/test-studio-prompt.mjs`.
+4. **Log chat Studio (opzionale)**: con `moduleName: "Studio"`, il server logga in console una riga di verifica (`study_level` raw/normalized, presenza della riga `Current study level:`) e il **system prompt completo** (delimitatori `FINAL_SYSTEM_PROMPT_*`). Per disattivare solo il dump lungo: `OXY_LOG_STUDIO_PROMPT=0` (default: log completo). Test locale: `node scripts/test-studio-prompt.mjs`, `node scripts/test-lavoro-prompt.mjs`.
 
 5. Nell’app (`.env` nella root del progetto Expo) imposta:
    ```bash
@@ -27,7 +27,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 
 ## Endpoint
 
-- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo utile con `moduleName: "Studio"`: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **`moduleName: "Studio"`** il system message è **solo** il prompt tutor operativo (lingua, nome, livello, OVERRIDE, regole Studio) più un estratto essenziale della Memory Vault — **non** si usa il prompt base OXY Real (niente tono “amico/amica”, conoscenza app, ecc.).
+- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo **Studio**: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `work_sector?` (solo **Lavoro**: `unknown` \| `administration` \| `marketing` \| `sales` \| `hr` \| `finance` \| `logistics` \| `it` \| `legal` \| `other`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **`moduleName: "Studio"`** il system message è **solo** il prompt tutor Studio + memoria essenziale. Con **`moduleName: "Lavoro"`** — stesso schema: prompt **Lavoro** dedicato (discovery una domanda alla volta, poi piano) + settore + memoria essenziale, **senza** prompt base OXY Real.
 - `GET /api/chat/history` — cronologia chat. Header `Authorization: Bearer <idToken>` (o query `idToken`). Risposta: `{ messages }`.
 - `POST /api/chat/messages` — salvataggio messaggio. Header o body `idToken`, body `role`, `content`. Risposta: `{ ok: true }`.
 - `GET /health` — controllo stato.

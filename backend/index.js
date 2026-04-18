@@ -21,7 +21,12 @@ import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 import * as fsSync from 'fs';
-import { normalizeStudyLevel, buildStudioExclusiveFullPrompt } from './oxyGuidedModes.js';
+import {
+  normalizeStudyLevel,
+  buildStudioExclusiveFullPrompt,
+  normalizeWorkSector,
+  buildLavoroExclusiveFullPrompt,
+} from './oxyGuidedModes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Storage locale (P0: su Render senza Persistent Disk è effimero).
@@ -826,6 +831,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       dateISO: dateISOInput,
       initialMessage,
       study_level: studyLevelRaw,
+      work_sector: workSectorRaw,
       intent_anchor: intentAnchorRaw,
     } = req.body;
     const useGemini = isValidGeminiKey(clientGeminiKey);
@@ -932,10 +938,13 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
     const studyLevelNorm = normalizeStudyLevel(studyLevelRaw);
+    const workSectorNorm = normalizeWorkSector(workSectorRaw);
     const intentAnchor = typeof intentAnchorRaw === 'string' ? intentAnchorRaw.trim().slice(0, 160) : '';
     const isStudioModule = String(moduleName || '').trim() === 'Studio';
+    const isLavoroModule = String(moduleName || '').trim() === 'Lavoro';
     const userNameTrim = typeof userName === 'string' ? userName.trim() : '';
     const memoryEssentialForStudio = memoryBlock && String(memoryBlock).trim() ? String(memoryBlock).trim() : '';
+    const memoryEssentialForLavoro = memoryEssentialForStudio;
     // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
@@ -951,20 +960,28 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         memoryEssential: memoryEssentialForStudio,
         intentAnchor,
       })
-      : buildOxySystemPrompt({
-        customAiName: customAiName || 'OXY',
-        voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
-        userName: userNameTrim,
-        nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
-        dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
-        language: language || 'it',
-        moduleName: moduleName || 'default',
-        memoryBlock,
-        diaryBlock: diaryBlock || undefined,
-        hasImage: !!imageBase64,
-        initialOnboarding: isInitialMessage,
-        chatModel,
-      });
+      : isLavoroModule
+        ? buildLavoroExclusiveFullPrompt({
+          language: language || 'it',
+          userName: userNameTrim,
+          workSector: workSectorNorm,
+          memoryEssential: memoryEssentialForLavoro,
+          intentAnchor,
+        })
+        : buildOxySystemPrompt({
+            customAiName: customAiName || 'OXY',
+            voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
+            userName: userNameTrim,
+            nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
+            dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
+            language: language || 'it',
+            moduleName: moduleName || 'default',
+            memoryBlock,
+            diaryBlock: diaryBlock || undefined,
+            hasImage: !!imageBase64,
+            initialOnboarding: isInitialMessage,
+            chatModel,
+          });
     messages.push({ role: 'system', content: systemContent });
 
     if (isStudioModule) {

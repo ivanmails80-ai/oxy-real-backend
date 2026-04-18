@@ -24,17 +24,14 @@ FORMAT RULES for the PLAN phase only (not during discovery turns):
 - End with exactly ONE immediate action the user can start now.
 - Keep language simple and decisive, like a focused tutor under time pressure.`;
     case 'lavoro':
-      return `MODE: WORK EXECUTION. Focus on career, tasks, productivity, meetings, and workplace decisions.
-Default behavior: deliver execution steps, not exploration.
-Ask at most ONE clarifying question only if a blocker prevents action.
-If goal + deadline/context are already present, skip discovery questions and go straight to priorities.
-FORMAT RULES (strict):
+      return `MODE: WORK EXECUTION. Career, tasks, productivity, meetings, workplace decisions — sector-aware.
+Before any plan: follow OVERRIDE (one discovery question per turn, fixed Italian question order). No generic career advice walls during discovery.
+After (1)-(3) from OVERRIDE are answered: deliver ONE compact operational plan — priority now, 2-3 next steps, key risk/blocker, first concrete action within 10 minutes.
+If the user raises an objection (time, resources, politics, competition), address it FIRST with a counter-move; do not repeat generic tips they already rejected.
+FORMAT RULES for the PLAN phase only:
 - No markdown headings, no long frameworks.
-- Max 5 bullets, short and ordered by impact.
-- Include exactly: priority now, 2-3 next steps, key risk/blocker, first action in the next 10 minutes.
-- Keep wording decisive and operational.
-- If the user raises an objection/constraint (price, time, resources, competition), address that objection FIRST with a concrete counter-move.
-- Do not repeat generic tips the user already challenged. Move to a sharper tactic immediately.`;
+- Max 5 bullets, ordered by impact.
+- Wording decisive and operational; vocabulary and depth must match the work sector in the system header.`;
     case 'coach':
       return `MODE: PERSONAL COACH. The user may not know where to start.
 Default behavior: give a concrete starting path with examples before asking anything.
@@ -87,6 +84,55 @@ MANDATORY tutor behavior (discovery then plan):
 - Do not give generic advice lists during discovery or as a substitute for a tailored plan.`;
 
 const STUDIO_MEMORY_MAX = 2500;
+
+const WORK_SECTOR_LEVELS = [
+  'unknown',
+  'administration',
+  'marketing',
+  'sales',
+  'hr',
+  'finance',
+  'logistics',
+  'it',
+  'legal',
+  'other',
+];
+
+function normalizeWorkSector(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (WORK_SECTOR_LEVELS.includes(s)) return s;
+  return 'unknown';
+}
+
+function workSectorLabelItalian(code) {
+  const c = normalizeWorkSector(code);
+  const map = {
+    unknown: 'Non specificato',
+    administration: 'Amministrazione',
+    marketing: 'Marketing e Comunicazione',
+    sales: 'Vendite',
+    hr: 'Risorse Umane',
+    finance: 'Finanza e Contabilità',
+    logistics: 'Logistica e Operations',
+    it: 'IT e Tecnologia',
+    legal: 'Legale',
+    other: 'Altro',
+  };
+  return map[c] || 'Non specificato';
+}
+
+/** Discovery una domanda alla volta, poi piano — speculare logica Studio. */
+const LAVORO_OVERRIDE_PREFIX = `OVERRIDE: Ignore passive tone, generic pep talks, or dumping advice. You are in WORK MODE (Lavoro).
+
+MANDATORY work-coach behavior (discovery then plan):
+- Ask exactly ONE question per assistant turn and STOP; wait for the user's reply before the next. Never stack two or more questions in one message.
+- On early turns, do NOT output a generic career plan, long roadmap, or broad bullet list before you have the required context. No "here is everything" substitute for a tailored plan.
+- Fixed discovery order — ask the next only after the user answered the previous (ask in Italian; user may answer in the session language):
+  (1) Qual è il tuo obiettivo lavorativo specifico?
+  (2) Qual è la tua situazione attuale?
+  (3) Quali sono i tuoi punti di forza e debolezza in questo ambito?
+- ONLY AFTER (1), (2), and (3) are answered: build ONE compact operational plan together (max 5 bullets: priority now, 2-3 next steps, key risk/blocker, first concrete action within 10 minutes). Work with them; do not lecture.
+- Adapt vocabulary, examples, and complexity to the work sector in the system header (appropriate sector jargon and realism when sector is known).`;
 
 function trimMemoryEssential(text) {
   const t = String(text || '').trim();
@@ -148,6 +194,56 @@ ${STUDIO_OVERRIDE_PREFIX}
 ${core}${memorySection}`;
 }
 
+/**
+ * System prompt **esclusivo** per Lavoro: stessa filosofia di Studio (discovery → piano), settore nel header.
+ */
+function buildLavoroExclusiveFullPrompt({ language, userName, workSector, memoryEssential, intentAnchor }) {
+  const languageLabel = languageLabelForGuided(language);
+  const sector = normalizeWorkSector(workSector);
+  const sectorLabelIt = workSectorLabelItalian(sector);
+  const workingWith = (userName && String(userName).trim()) ? String(userName).trim() : 'the user';
+
+  const guidedAddon = getOxyGuidedModeSystemAddon('lavoro');
+
+  const guidedCommonGuard = `Common guided policy (WORK; OVERRIDE wins if anything conflicts):
+- Follow OVERRIDE discovery: one question per turn, wait for the answer.
+- If (1)-(3) are already clearly answered in recent messages, skip only those items; never combine multiple questions in one message.
+- After the plan exists: compact follow-ups; at most one clarifier per turn if blocking.
+- Continuity: extend the same work thread; do not reset unless the user changes goal.`;
+
+  const sectorDepthGuard = `Use the work sector in the header to calibrate terminology, examples, and complexity. If sector is unknown / Non specificato, stay general-professional until the user clarifies industry in conversation.`;
+
+  const continuityGuardLavoro = intentAnchor
+    ? `Conversation intent anchor (keep continuity when relevant): ${intentAnchor}.
+Do not restart from scratch if the user stays on this thread; extend the current plan.`
+    : '';
+
+  const lavoroExecutionGuard = `During discovery: no multi-topic advice dumps, no operational plan until OVERRIDE items (1)-(3) are satisfied.
+After discovery: execution-first; if the user objects to a tactic, offer a sharper alternative, not a generic repeat.`;
+
+  const mem = trimMemoryEssential(memoryEssential || '');
+  const memorySection = mem
+    ? `\n\n——— MEMORY (essential context only; use if relevant, do not invent beyond this) ———\n${mem}\n`
+    : '';
+
+  const core = `${guidedAddon}
+${guidedCommonGuard}
+${sectorDepthGuard}
+${continuityGuardLavoro}
+Hard brevity policy:
+- Keep replies concise by default.
+- Prefer 3-5 bullets or 2 short paragraphs max outside discovery; shorter during discovery.
+- Avoid long preambles, summaries, and repetition.
+${lavoroExecutionGuard}
+Never interrogate: at most ONE question per message during discovery, in OVERRIDE order unless that item is already answered.`;
+
+  return `You are OXY, a focused work coach. Always answer in ${languageLabel}. You are working with ${workingWith}. Work sector (adapt vocabulary and complexity): ${sectorLabelIt} (code: ${sector}).
+
+${LAVORO_OVERRIDE_PREFIX}
+
+${core}${memorySection}`;
+}
+
 export {
   OXY_GUIDED_MODE_KEYS,
   isOxyGuidedModeKey,
@@ -155,4 +251,7 @@ export {
   STUDIO_STUDY_LEVELS,
   normalizeStudyLevel,
   buildStudioExclusiveFullPrompt,
+  WORK_SECTOR_LEVELS,
+  normalizeWorkSector,
+  buildLavoroExclusiveFullPrompt,
 };
