@@ -121,6 +121,15 @@ const billingLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/** Polling stato abbonamento post-checkout: limite separato (evita 429 dopo pochi secondi). */
+const billingPollLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  message: { error: 'Troppe verifiche abbonamento. Attendi qualche minuto e riprova.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 50, // Limite generico per altri endpoint
@@ -2196,6 +2205,44 @@ async function findUidByStripeSubscriptionId(subscriptionId) {
   return null;
 }
 
+/**
+ * Aggiorna billing da una Stripe Checkout Session (stessa logica del webhook checkout.session.completed).
+ * @returns {{ ok: true, uid?: string, planId?: string, pack?: boolean } | { ok: false, error: string }}
+ */
+async function persistCheckoutSessionBilling(session) {
+  const metadata = session.metadata || {};
+  const uid = metadata.uid;
+  const planId = metadata.planId;
+  if (!uid || !planId) {
+    return { ok: false, error: 'metadata_mancante' };
+  }
+  if (planId.startsWith('pack_')) {
+    const amount = TOKEN_PACK_AMOUNTS[planId];
+    if (typeof amount === 'number' && amount > 0) {
+      await addTokenBalance(uid, amount);
+    }
+    return { ok: true, uid, planId, pack: true };
+  }
+  const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
+  const status = mode === 'subscription' ? 'active' : 'paid';
+  await writeBilling(uid, {
+    uid,
+    planId,
+    mode,
+    status,
+    stripeCustomerId: session.customer || null,
+    stripeSubscriptionId: session.subscription || null,
+  });
+  return { ok: true, uid, planId };
+}
+
+function buildStripeCheckoutSuccessUrl() {
+  const base = (STRIPE_SUCCESS_URL || 'https://www.oxyreal.it/chat').trim().replace(/\/$/, '');
+  const join = base.includes('?') ? '&' : '?';
+  // Placeholder sostituito da Stripe al redirect: consente conferma lato server se il webhook è in ritardo.
+  return `${base}${join}paid=1&session_id={CHECKOUT_SESSION_ID}`;
+}
+
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   try {
@@ -2231,9 +2278,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const isSubscription = ['oxy_pass', 'byok'].includes(planIdVal.value);
     const mode = isSubscription ? 'subscription' : 'payment';
 
-    const successUrl = STRIPE_SUCCESS_URL
-      ? (STRIPE_SUCCESS_URL.includes('?') ? STRIPE_SUCCESS_URL + '&paid=1' : STRIPE_SUCCESS_URL + '?paid=1')
-      : 'https://www.oxyreal.it/chat?paid=1';
+    const successUrl = buildStripeCheckoutSuccessUrl();
     const cancelUrl = STRIPE_CANCEL_URL || 'https://www.oxyreal.it/settings/billing';
 
     const session = await stripe.checkout.sessions.create({
@@ -2260,8 +2305,54 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   }
 });
 
+// POST /api/billing/confirm-session — dopo redirect Stripe: verifica la sessione e aggiorna Firestore (se webhook assente/in ritardo).
+app.post('/api/billing/confirm-session', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
+    if (!sessionId || !sessionId.startsWith('cs_')) {
+      return res.status(400).json({ error: 'sessionId Checkout non valido.' });
+    }
+
+    const stripe = await getStripeClient();
+    if (!stripe) {
+      return res.status(503).json({ error: 'Stripe non configurato lato server.' });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.metadata?.uid !== uid) {
+      return res.status(403).json({ error: 'Questa sessione di pagamento non appartiene al tuo account.' });
+    }
+    if (session.status !== 'complete') {
+      return res.status(400).json({ error: 'Pagamento non completato.' });
+    }
+    const paidOk =
+      session.payment_status === 'paid' ||
+      session.payment_status === 'no_payment_required';
+    if (!paidOk) {
+      return res.status(400).json({ error: 'Stato pagamento non confermato.' });
+    }
+
+    const persisted = await persistCheckoutSessionBilling(session);
+    if (!persisted.ok) {
+      if (persisted.error === 'metadata_mancante') {
+        return res.status(400).json({ error: 'Sessione senza metadati piano: contatta il supporto.' });
+      }
+      return res.status(500).json({ error: 'Impossibile aggiornare l\'abbonamento.' });
+    }
+
+    return res.json({ ok: true, planId: persisted.planId, pack: !!persisted.pack });
+  } catch (e) {
+    console.error('[Backend] POST /api/billing/confirm-session error:', e);
+    res.status(500).json({ error: 'Errore durante la conferma del pagamento.' });
+  }
+});
+
 // GET /api/billing/wait-active — polling leggero post-checkout: controlla billing.active su Firestore
-app.get('/api/billing/wait-active', billingLimiter, async (req, res) => {
+app.get('/api/billing/wait-active', billingPollLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
     const { uid } = await requireAuth(idToken);
@@ -2276,7 +2367,7 @@ app.get('/api/billing/wait-active', billingLimiter, async (req, res) => {
 });
 
 // GET /api/billing/status — stato abbonamento/lifetime per l'utente corrente
-app.get('/api/billing/status', billingLimiter, async (req, res) => {
+app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
     const { uid, email } = await requireAuth(idToken);
@@ -2642,45 +2733,28 @@ app.post('/api/billing/webhook', async (req, res) => {
 
     if (type === 'checkout.session.completed') {
       const session = event.data?.object || {};
-      const metadata = session.metadata || {};
-      const uid = metadata.uid;
-      const planId = metadata.planId;
-      if (uid && planId) {
-        if (planId.startsWith('pack_')) {
-          const amount = TOKEN_PACK_AMOUNTS[planId];
-          if (typeof amount === 'number' && amount > 0) {
-            await addTokenBalance(uid, amount);
-          }
-        } else {
-          const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
-          const status = mode === 'subscription' ? 'active' : 'paid';
-          await writeBilling(uid, {
-            uid,
-            planId,
-            mode,
-            status,
-            stripeCustomerId: session.customer || null,
-            stripeSubscriptionId: session.subscription || null,
-          });
-          // Email di benvenuto dopo pagamento (se SMTP configurato e WELCOME_EMAIL_AFTER_PAYMENT o DOCS_EMAIL_AUTOSEND_ENABLED)
-          try {
-            const transport = getMailerForWelcome();
-            if (transport && firebaseInitialized) {
-              const userRecord = await admin.auth().getUser(uid);
-              const to = (userRecord?.email || '').trim().toLowerCase();
-              if (to) {
-                const body = getWelcomeEmailBody(planId, mode);
-                await transport.sendMail({
-                  from: SMTP_FROM,
-                  to,
-                  subject: 'Welcome to OXY Real',
-                  text: body,
-                });
-              }
+      const persisted = await persistCheckoutSessionBilling(session);
+      if (persisted.ok && persisted.uid && persisted.planId && !persisted.pack) {
+        const planId = persisted.planId;
+        const uid = persisted.uid;
+        const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
+        try {
+          const transport = getMailerForWelcome();
+          if (transport && firebaseInitialized) {
+            const userRecord = await admin.auth().getUser(uid);
+            const to = (userRecord?.email || '').trim().toLowerCase();
+            if (to) {
+              const body = getWelcomeEmailBody(planId, mode);
+              await transport.sendMail({
+                from: SMTP_FROM,
+                to,
+                subject: 'Welcome to OXY Real',
+                text: body,
+              });
             }
-          } catch (mailErr) {
-            console.error('[Backend] Welcome email after payment failed:', mailErr?.message || mailErr);
           }
+        } catch (mailErr) {
+          console.error('[Backend] Welcome email after payment failed:', mailErr?.message || mailErr);
         }
       }
     } else if (type === 'customer.subscription.deleted' || type === 'customer.subscription.canceled') {
