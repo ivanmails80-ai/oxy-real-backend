@@ -2260,6 +2260,22 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   }
 });
 
+// GET /api/billing/wait-active — polling leggero post-checkout: controlla billing.active su Firestore
+app.get('/api/billing/wait-active', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!firebaseInitialized) return res.json({ active: false });
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    const billing = doc.exists ? (doc.data()?.billing || {}) : {};
+    return res.json({ active: billing.active === true });
+  } catch (e) {
+    console.error('[Backend] GET /api/billing/wait-active error:', e);
+    res.status(500).json({ error: 'Errore durante la verifica.' });
+  }
+});
+
 // GET /api/billing/status — stato abbonamento/lifetime per l'utente corrente
 app.get('/api/billing/status', billingLimiter, async (req, res) => {
   try {
