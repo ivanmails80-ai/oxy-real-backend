@@ -2230,7 +2230,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
       return res.status(400).json({ error: `Nessun price configurato per il piano ${planIdVal.value}.` });
     }
 
-    const isSubscription = planIdVal.value.startsWith('sub_');
+    const isSubscription = ['oxy_pass', 'byok'].includes(planIdVal.value);
     const mode = isSubscription ? 'subscription' : 'payment';
 
     const successUrl = STRIPE_SUCCESS_URL || 'oxyreal://billing/success';
