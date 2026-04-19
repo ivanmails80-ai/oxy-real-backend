@@ -2233,7 +2233,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const isSubscription = ['oxy_pass', 'byok'].includes(planIdVal.value);
     const mode = isSubscription ? 'subscription' : 'payment';
 
-    const successUrl = STRIPE_SUCCESS_URL || 'oxyreal://billing/success';
+    const successUrl = STRIPE_SUCCESS_URL || 'https://oxyreal.it/chat?paid=1';
     const cancelUrl = STRIPE_CANCEL_URL || 'oxyreal://billing/cancel';
 
     const session = await stripe.checkout.sessions.create({
