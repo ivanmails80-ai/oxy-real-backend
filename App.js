@@ -3943,7 +3943,7 @@ export default function App() {
                 style={{ backgroundColor: '#c5a059', paddingVertical: 18, paddingHorizontal: 18, borderRadius: 16, marginBottom: 14 }}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  handleCheckout('sub_elite');
+                  handleCheckout('oxy_pass');
                 }}
               >
                 <Text style={{ color: '#0a0a0a', fontSize: 17, fontWeight: '700', marginBottom: 4 }}>{t('register.subscribeElite')}</Text>

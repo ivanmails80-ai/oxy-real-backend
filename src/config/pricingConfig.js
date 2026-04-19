@@ -7,7 +7,7 @@ export const CURRENCY_DEFAULT = 'EUR';
 export const DAILY_LIMITS = {
   sub_starter: 5,
   sub_pro: 10,
-  sub_elite: 15,
+  oxy_pass: 15,
 };
 
 
@@ -19,7 +19,7 @@ export const ANNUAL_DISCOUNT_PERCENT = 20;
 // - one_time: acquisto una tantum (utente inserisce la propria Oxy Key)
 export const PLANS = [
   {
-    id: 'sub_elite',
+    id: 'oxy_pass',
     group: 'subscription',
     name: 'OXY Pass',
     type: 'subscription',
@@ -52,10 +52,7 @@ export const getPlanFeatures = (planId) => {
 export const getLaunchDiscountPrice = (price) => Math.floor(Number(price) * 0.5);
 
 // Pacchetti token (acquisto una tantum: credito consumato in chat con la chiave OXY)
-export const TOKEN_PACKS = [
-  { id: 'pack_100k', nameKey: 'pricing.packs.100k.name', tokens: 100000, suggestedPrice: 5 },
-  { id: 'pack_500k', nameKey: 'pricing.packs.500k.name', tokens: 500000, suggestedPrice: 20 },
-];
+export const TOKEN_PACKS = [];
 
 export const getPlanById = (id) => PLANS.find((p) => p.id === id) || null;
 /** Restituisce il piano per visualizzazione: risolve sub_x_annual al piano base sub_x. */
