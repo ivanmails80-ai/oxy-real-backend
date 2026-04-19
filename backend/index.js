@@ -2231,8 +2231,10 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const isSubscription = ['oxy_pass', 'byok'].includes(planIdVal.value);
     const mode = isSubscription ? 'subscription' : 'payment';
 
-    const successUrl = STRIPE_SUCCESS_URL || 'https://oxyreal.it/chat?paid=1';
-    const cancelUrl = STRIPE_CANCEL_URL || 'oxyreal://billing/cancel';
+    const successUrl = STRIPE_SUCCESS_URL
+      ? (STRIPE_SUCCESS_URL.includes('?') ? STRIPE_SUCCESS_URL + '&paid=1' : STRIPE_SUCCESS_URL + '?paid=1')
+      : 'https://www.oxyreal.it/chat?paid=1';
+    const cancelUrl = STRIPE_CANCEL_URL || 'https://www.oxyreal.it/settings/billing';
 
     const session = await stripe.checkout.sessions.create({
       mode,
@@ -2264,10 +2266,9 @@ app.get('/api/billing/wait-active', billingLimiter, async (req, res) => {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
     const { uid } = await requireAuth(idToken);
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
-    if (!firebaseInitialized) return res.json({ active: false });
-    const doc = await admin.firestore().collection('users').doc(uid).get();
-    const billing = doc.exists ? (doc.data()?.billing || {}) : {};
-    return res.json({ active: billing.active === true });
+    const billing = await readBilling(uid);
+    const active = billing ? computeSubscriptionActive(billing) : false;
+    return res.json({ active });
   } catch (e) {
     console.error('[Backend] GET /api/billing/wait-active error:', e);
     res.status(500).json({ error: 'Errore durante la verifica.' });
