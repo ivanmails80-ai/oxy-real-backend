@@ -351,6 +351,13 @@ function computeSubscriptionActive(billing) {
   return false;
 }
 
+/** Piano BYOK: chat/voce usano solo chiavi client (OpenAI sk- / Gemini), mai OPENAI_API_KEY di bordo. */
+function isByokPlanId(planId) {
+  if (planId == null) return false;
+  const p = String(planId).trim().toLowerCase();
+  return p === 'byok' || p === 'sub_byok' || p.includes('byok');
+}
+
 async function ensureUsageDir() {
   await fs.mkdir(USAGE_DIR, { recursive: true });
 }
@@ -872,19 +879,26 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
           const active = mode === 'subscription'
             ? computeSubscriptionActive(billing)
             : status === 'paid';
-          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
+          const planIdForKey = billing?.planId || '';
+          const allowServerOpenAi =
+            isOwnerUnlimited || (active && mode === 'subscription' && !isByokPlanId(planIdForKey));
+          if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // token non valido → si passa all'eventuale apiKey client
       }
     }
-    // Credito pacchetto token: se ha balance > 0 usa la nostra chiave (fiducia cliente = consumo reale)
+    // Credito pacchetto token: se ha balance > 0 usa la nostra chiave (fiducia cliente = consumo reale). BYOK escluso.
     let useTokenPack = false;
     if (!openaiKey && uid && OPENAI_API_KEY) {
-      const balance = await readTokenBalance(uid);
-      if (balance > 0) {
-        openaiKey = OPENAI_API_KEY;
-        useTokenPack = true;
+      const billingForPack = billingSnapshot || (await readBilling(uid));
+      const planIdPack = billingForPack?.planId || '';
+      if (!isByokPlanId(planIdPack)) {
+        const balance = await readTokenBalance(uid);
+        if (balance > 0) {
+          openaiKey = OPENAI_API_KEY;
+          useTokenPack = true;
+        }
       }
     }
     if (!openaiKey && clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-')) {
@@ -1599,7 +1613,10 @@ app.post('/api/voice/transcribe', voiceLimiter, async (req, res) => {
           const active = mode === 'subscription'
             ? status === 'active'
             : status === 'paid';
-          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
+          const planIdForKey = billing?.planId || '';
+          const allowServerOpenAi =
+            isOwnerUnlimited || (active && mode === 'subscription' && !isByokPlanId(planIdForKey));
+          if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // token non valido → si passa all'eventuale apiKey client
@@ -1658,8 +1675,10 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
           const active = mode === 'subscription'
             ? status === 'active'
             : status === 'paid';
-          // Per proteggere i costi: OPENAI_API_KEY solo per abbonamenti (non per Lifetime)
-          if (isOwnerUnlimited || (active && mode === 'subscription')) openaiKey = OPENAI_API_KEY;
+          const planIdForKey = billing?.planId || '';
+          const allowServerOpenAi =
+            isOwnerUnlimited || (active && mode === 'subscription' && !isByokPlanId(planIdForKey));
+          if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
         // se il token è invalido, si passa al flusso clientApiKey (che comunque richiede una chiave)
