@@ -2594,7 +2594,7 @@ app.post('/api/admin/delete-user-data', billingLimiter, async (req, res) => {
 // POST /api/billing/webhook — webhook Stripe per aggiornare lo stato abbonamento
 app.post('/api/billing/webhook', async (req, res) => {
   try {
-    const stripe = getStripe();
+    const stripe = await getStripeClient();
     if (!stripe) {
       return res.status(400).json({ error: 'Stripe non configurato lato server (manca STRIPE_SECRET_KEY).' });
     }
@@ -2637,7 +2637,7 @@ app.post('/api/billing/webhook', async (req, res) => {
             await addTokenBalance(uid, amount);
           }
         } else {
-          const mode = session.mode || (planId.startsWith('sub_') ? 'subscription' : 'payment');
+          const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
           const status = mode === 'subscription' ? 'active' : 'paid';
           await writeBilling(uid, {
             uid,
