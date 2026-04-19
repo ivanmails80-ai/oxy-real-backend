@@ -260,18 +260,17 @@ function getMailerForWelcome() {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY?.trim();
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET?.trim();
 const STRIPE_PRICE_MAP = {
-  sub_elite: process.env.STRIPE_PRICE_SUB_ELITE?.trim(),
-  pack_100k: process.env.STRIPE_PRICE_PACK_100K?.trim(),
-  pack_500k: process.env.STRIPE_PRICE_PACK_500K?.trim(),
+  oxy_pass: process.env.STRIPE_PRICE_OXY_PASS?.trim(),
+  byok: process.env.STRIPE_PRICE_BYOK?.trim(),
 };
 // Token inclusi per ogni pacchetto (per webhook)
-const TOKEN_PACK_AMOUNTS = { pack_100k: 100000, pack_500k: 500000 };
+const TOKEN_PACK_AMOUNTS = {};
 const STRIPE_SUCCESS_URL = process.env.STRIPE_SUCCESS_URL?.trim();
 const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL?.trim();
 
 // Nomi piani per email di benvenuto (allineati a pricingConfig lato app)
 const PLAN_DISPLAY_NAMES = {
-  sub_elite: 'OXY Pass',
+  oxy_pass: 'OXY Pass',
 };
 function getWelcomeEmailBody(planId, mode) {
   const planName = PLAN_DISPLAY_NAMES[planId] || planId;
@@ -299,7 +298,7 @@ const _dailyLimitElite = _quickTest != null ? _quickTest : Math.max(1, Math.min(
 const DAILY_LIMITS_BY_PLAN = {
   sub_starter: _dailyLimitStarter,
   sub_pro: _dailyLimitPro,
-  sub_elite: _dailyLimitElite,
+  oxy_pass: _dailyLimitElite,
 };
 const OWNER_UNLIMITED_PLAN_ID = 'owner_unlimited';
 const OWNER_ACCESS_CODE = String(process.env.OWNER_ACCESS_CODE || '').trim();
@@ -310,7 +309,7 @@ function normalizePlanIdForLimits(planId) {
   const p = planId.trim();
   if (p === 'sub_starter_annual') return 'sub_starter';
   if (p === 'sub_pro_annual') return 'sub_pro';
-  if (p === 'sub_elite_annual') return 'sub_elite';
+  if (p === 'oxy_pass_annual') return 'oxy_pass';
   return p;
 }
 
@@ -320,7 +319,7 @@ function getChatModelForPlan(planId, useTokenPack) {
   if (planId === OWNER_UNLIMITED_PLAN_ID) return OPENAI_MODEL_ELITE;
   if (!planId) return OPENAI_MODEL_STARTER; // Nessun piano attivo
   const p = String(planId).trim();
-  if (p.startsWith('sub_elite') || p === 'life_elite') return OPENAI_MODEL_ELITE;
+  if (p.startsWith('oxy_pass')) return OPENAI_MODEL_ELITE;
   if (p.startsWith('sub_pro') || p === 'life_pro') return OPENAI_MODEL_PRO;
   return OPENAI_MODEL_STARTER; // sub_starter, life_starter, sub_starter_annual, ecc.
 }
@@ -2403,10 +2402,10 @@ app.post('/api/billing/redeem-owner-code', billingLimiter, async (req, res) => {
 });
 
 // Piani assegnabili via admin (grant-plan) — solo abbonamenti e Lifetime, non pacchetti token
-const GRANTABLE_PLAN_IDS = ['sub_starter', 'sub_pro', 'sub_elite', 'life_starter', 'life_pro', 'life_elite'];
+const GRANTABLE_PLAN_IDS = ['sub_starter', 'sub_pro', 'oxy_pass', 'life_starter', 'life_pro', 'life_elite'];
 
 // POST /api/admin/grant-plan — solo Master: assegna un piano a un utente (per test dopo pagamento Stripe in fase test).
-// Body: { "planId": "sub_starter" | "sub_pro" | "sub_elite" | "life_starter" | "life_pro" | "life_elite", "uid"?: "..." }.
+// Body: { "planId": "sub_starter" | "sub_pro" | "oxy_pass" | "life_starter" | "life_pro" | "life_elite", "uid"?: "..." }.
 // Se uid manca, si assegna al Master. Utile quando il webhook Stripe non è ancora configurato e hai già pagato in test.
 app.post('/api/admin/grant-plan', billingLimiter, async (req, res) => {
   try {
@@ -2452,12 +2451,12 @@ app.post('/api/admin/grant-elite', billingLimiter, async (req, res) => {
     const targetUid = typeof bodyUid === 'string' && bodyUid.trim() ? bodyUid.trim() : uid;
     await writeBilling(targetUid, {
       uid: targetUid,
-      planId: 'sub_elite',
+      planId: 'oxy_pass',
       mode: 'subscription',
       status: 'active',
       grantedBy: 'admin',
     });
-    return res.json({ ok: true, planId: 'sub_elite', uid: targetUid });
+    return res.json({ ok: true, planId: 'oxy_pass', uid: targetUid });
   } catch (e) {
     console.error('[Backend] POST /api/admin/grant-elite error:', e);
     res.status(500).json({ error: 'Errore durante l\'assegnazione.' });
