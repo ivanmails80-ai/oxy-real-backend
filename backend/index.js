@@ -2698,6 +2698,38 @@ app.post('/api/billing/webhook', async (req, res) => {
           stripeSubscriptionId: subscription.id,
         });
       }
+    } else if (type === 'customer.subscription.created' || type === 'customer.subscription.updated') {
+      const subscription = event.data?.object || {};
+      let uid = subscription.metadata?.uid || null;
+      if (!uid) uid = await findUidByStripeSubscriptionId(subscription.id);
+      if (!uid && subscription.customer && stripe) {
+        try {
+          const customer = await stripe.customers.retrieve(String(subscription.customer));
+          const email = typeof customer === 'object' && !customer.deleted ? customer.email : null;
+          if (email && firebaseInitialized) {
+            const userRecord = await admin.auth().getUserByEmail(email.trim().toLowerCase());
+            uid = userRecord?.uid || null;
+          }
+        } catch (_) {}
+      }
+      if (uid && subscription.status === 'active') {
+        const current = (await readBilling(uid)) || {};
+        const priceId = subscription.items?.data?.[0]?.price?.id || null;
+        const PRICE_TO_PLAN = {
+          'price_1TN7PHGmOoq3tAJhVzPdMTOH': 'oxy_pass',
+          'price_1TN7RHGmOoq3tAJh2L9PO1sJ': 'byok',
+        };
+        const planId = PRICE_TO_PLAN[priceId] || current.planId || subscription.metadata?.planId || null;
+        await writeBilling(uid, {
+          ...current,
+          uid,
+          planId,
+          status: 'active',
+          mode: 'subscription',
+          stripeSubscriptionId: subscription.id,
+          currentPeriodEnd: subscription.current_period_end ?? null,
+        });
+      }
     }
 
     res.json({ received: true });
