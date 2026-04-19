@@ -2121,9 +2121,8 @@ function billingPath(uid) {
 async function readBilling(uid) {
   if (!uid) return null;
   try {
-    const raw = await fs.readFile(billingPath(uid), 'utf8');
-    const data = JSON.parse(raw);
-    return data && typeof data === 'object' ? data : null;
+    const doc = await admin.firestore().collection('billing').doc(uid).get();
+    return doc.exists ? (doc.data() || null) : null;
   } catch {
     return null;
   }
@@ -2131,9 +2130,8 @@ async function readBilling(uid) {
 
 async function writeBilling(uid, data) {
   if (!uid || !data || typeof data !== 'object') return;
-  await ensureBillingDir();
   const payload = { ...data, updatedAt: new Date().toISOString() };
-  await fs.writeFile(billingPath(uid), JSON.stringify(payload, null, 0), 'utf8');
+  await admin.firestore().collection('billing').doc(uid).set(payload, { merge: true });
 }
 
 // ——— User meta (early adopters, share-for-discount): data/users/{uid}.json
