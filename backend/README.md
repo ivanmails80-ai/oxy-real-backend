@@ -5,7 +5,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 ## Ruoli
 
 - **Master**: email in `MASTER_EMAIL`. Il backend usa `OPENAI_API_KEY` e `TAVILY_API_KEY` proprie; l’app **non** deve contenere queste chiavi.
-- **Altri utenti**: l’app invia la propria Oxy Key nel body; il backend la usa per chiamare OpenAI/Tavily.
+- **Altri utenti**: l’app invia le proprie chiavi BYOK (OpenAI / Gemini) nel body; il backend le usa per chiamare OpenAI/Tavily.
 
 ## Setup
 
@@ -34,7 +34,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 
 ## Conoscenza per l'assistente IA
 
-Il file **`knowledge/oxy_app_knowledge.md`** contiene la descrizione di funzionalità, prompt, server, Oxy Key, Memory Vault, Power Badges e istruzioni d'uso. Viene caricato all'avvio del server e iniettato nel system prompt dell'IA: così OXY può rispondere in modo esaustivo quando l'utente chiede "cosa puoi fare", "come funziona", "come accedo al server", ecc. Il file **non** è incluso nell'app; resta solo sul server. Per aggiornare le risposte dell'assistente, modifica il file e riavvia il backend (o implementa un reload su richiesta).
+Il file **`knowledge/oxy_app_knowledge.md`** contiene la descrizione di funzionalità, prompt, server, chiavi BYOK, Memory Vault, Power Badges e istruzioni d'uso. Viene caricato all'avvio del server e iniettato nel system prompt dell'IA: così OXY può rispondere in modo esaustivo quando l'utente chiede "cosa puoi fare", "come funziona", "come accedo al server", ecc. Il file **non** è incluso nell'app; resta solo sul server. Per aggiornare le risposte dell'assistente, modifica il file e riavvia il backend (o implementa un reload su richiesta).
 
 ## Dati
 

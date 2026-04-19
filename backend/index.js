@@ -824,7 +824,7 @@ DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
 
 • SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
 ${onboardingBlock}
-${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, Oxy Key, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
+${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, chiavi BYOK, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
 Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
 }
 
@@ -851,7 +851,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     } = req.body;
     const useGemini = isValidGeminiKey(clientGeminiKey);
     if (!idToken && !clientApiKey && !useGemini) {
-      return res.status(400).json({ error: 'idToken, Oxy Key o chiave Gemini richiesti' });
+      return res.status(400).json({ error: 'idToken o chiavi BYOK (OpenAI / Gemini) richiesti' });
     }
 
     let openaiKey = null;
@@ -862,7 +862,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       // Regola:
       // - Master: usa OPENAI_API_KEY (se presente)
       // - Utente con abbonamento attivo (subscription): usa OPENAI_API_KEY (se presente)
-      // - Lifetime / nessun piano: richiede apiKey client (Oxy Key personale)
+      // - Lifetime / nessun piano: richiede apiKey client (chiavi BYOK / OpenAI personale)
       try {
         const authData = await requireAuth(idToken);
         uid = authData?.uid || null;
@@ -905,7 +905,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       openaiKey = clientApiKey.trim();
     }
     if (!openaiKey && !useGemini) {
-      return res.status(400).json({ error: 'Oxy Key o chiave Gemini non configurata. Inserisci una chiave nelle impostazioni o accedi come Master.' });
+      return res.status(400).json({ error: 'Chiavi BYOK (OpenAI o Gemini) non configurate. Inseriscile in Impostazioni → Chiavi BYOK o accedi come Master.' });
     }
 
     // Vision AI: con Gemini (chiave utente) consentita; con OpenAI solo piani Pro/Elite.
@@ -1599,7 +1599,7 @@ app.post('/api/voice/transcribe', voiceLimiter, async (req, res) => {
     // Regola:
     // - Master: usa OPENAI_API_KEY (se presente)
     // - Utente con abbonamento attivo (subscription): usa OPENAI_API_KEY (se presente)
-    // - Lifetime / nessun piano: richiede apiKey client (Oxy Key personale)
+    // - Lifetime / nessun piano: richiede apiKey client (chiavi BYOK / OpenAI personale)
     if (idToken && firebaseInitialized) {
       try {
         const { uid, email } = await requireAuth(idToken);
@@ -1623,7 +1623,7 @@ app.post('/api/voice/transcribe', voiceLimiter, async (req, res) => {
       }
     }
     if (!openaiKey && clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-')) openaiKey = clientApiKey.trim();
-    if (!openaiKey) return res.status(400).json({ error: 'Oxy Key non configurata o non autorizzato.' });
+    if (!openaiKey) return res.status(400).json({ error: 'Chiave API non configurata o non autorizzata.' });
 
     let audioBase64 = req.body?.audioBase64 || '';
     if (typeof audioBase64 !== 'string') return res.status(400).json({ error: 'audioBase64 richiesto' });
@@ -1661,7 +1661,7 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
     // Regola:
     // - Master: usa OPENAI_API_KEY (se presente)
     // - Utente con abbonamento attivo (subscription): usa OPENAI_API_KEY (se presente)
-    // - Lifetime / nessun piano: richiede apiKey client (Oxy Key personale)
+    // - Lifetime / nessun piano: richiede apiKey client (chiavi BYOK / OpenAI personale)
     if (idToken && firebaseInitialized) {
       try {
         const { uid, email } = await requireAuth(idToken);
@@ -1685,7 +1685,7 @@ app.post('/api/tts', voiceLimiter, async (req, res) => {
       }
     }
     if (!openaiKey && clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-')) openaiKey = clientApiKey.trim();
-    if (!openaiKey) return res.status(400).json({ error: 'Oxy Key non configurata o non autorizzato.' });
+    if (!openaiKey) return res.status(400).json({ error: 'Chiave API non configurata o non autorizzata.' });
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text || text.length > 4096) return res.status(400).json({ error: 'Testo richiesto (max 4096 caratteri).' });
