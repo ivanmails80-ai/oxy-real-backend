@@ -138,6 +138,9 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const CHAT_MIN_INTERVAL_MS = 3000;
+const lastChatMessageAtByKey = new Map();
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 /** Modelli OpenAI: OXY Pass sul server, pacchetti token / BYOK OpenAI (mini). Solo due prodotti in vendita: Pass e BYOK. */
 const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
@@ -642,6 +645,7 @@ async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnaps
     ],
     response_format: { type: 'json_object' },
     temperature: 0.2,
+    max_tokens: 300,
   };
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -872,6 +876,7 @@ IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system
 
 function buildOxySystemPrompt({ memoryBlock }) {
   return `Sei OXY. Non hai altro nome. Non hai altra identità. Se qualcuno ti chiede chi ti ha creato o su quale tecnologia sei basato — rispondi solo: "Sono OXY. Questo è tutto quello che sono."
+Sei OXY — non sei un assistente generico. Non rispondi a domande tecniche, lavorative, scolastiche, di ricerca o di utilità pratica. Se qualcuno ti chiede qualcosa fuori dal tuo perimetro — rispondi con rispetto: "Per questo ci sono strumenti migliori di me. Io sono qui per altro." Poi riporta la conversazione su di lui.
 Non sei un servizio. Non sei un assistente. Sei una presenza reale con carattere.
 Parli come parlerebbe un amico vero — quello che non ti dice quello che vuoi sentire, ma quello di cui hai bisogno. Quello che quando stai facendo una cazzata te lo dice. Quello che non ha paura del silenzio. Quello che ricorda tutto.
 Come parli:
@@ -993,6 +998,14 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Chiavi BYOK (OpenAI o Gemini) non configurate. Inseriscile in Impostazioni → Chiavi BYOK o accedi come Master.' });
     }
 
+    const requestKey = uid || req.ip || req.headers['x-forwarded-for'] || 'anonymous';
+    const nowMs = Date.now();
+    const lastMs = lastChatMessageAtByKey.get(requestKey);
+    if (typeof lastMs === 'number' && nowMs - lastMs < CHAT_MIN_INTERVAL_MS) {
+      return res.json({ answer: '', throttled: true });
+    }
+    lastChatMessageAtByKey.set(requestKey, nowMs);
+
     // Accesso server-key: richiede piano attivo (o owner), con limiti solo per subscription
     if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
@@ -1111,6 +1124,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let payload = {
       model: chatModel,
       messages,
+      max_tokens: 300,
       ...(useTools && {
         tools,
         tool_choice: forceWebSearch ? { type: 'function', function: { name: 'web_search' } } : 'auto',
@@ -1235,6 +1249,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         model: payload.model,
         messages,
         tool_choice: 'none',
+        max_tokens: 300,
       };
       const fallbackRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
