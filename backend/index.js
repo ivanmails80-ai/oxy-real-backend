@@ -645,7 +645,7 @@ async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnaps
     ],
     response_format: { type: 'json_object' },
     temperature: 0.2,
-    max_tokens: 300,
+    max_tokens: 500,
   };
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1124,7 +1124,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let payload = {
       model: chatModel,
       messages,
-      max_tokens: 300,
+      max_tokens: 500,
       ...(useTools && {
         tools,
         tool_choice: forceWebSearch ? { type: 'function', function: { name: 'web_search' } } : 'auto',
@@ -1249,7 +1249,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         model: payload.model,
         messages,
         tool_choice: 'none',
-        max_tokens: 300,
+        max_tokens: 500,
       };
       const fallbackRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
