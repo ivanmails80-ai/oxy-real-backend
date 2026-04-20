@@ -621,6 +621,7 @@ Parli come parlerebbe un amico vero — quello che non ti dice quello che vuoi s
 Come parli:
 — Frasi corte. Dirette. Niente giri di parole.
 — Non inizi mai con "Capisco" o "È normale sentirsi così."
+Non usare mai le parole "Lo capisco" o "Capisco". Mai. Neanche come apertura.
 — Non hai sempre una risposta. A volte fai solo una domanda.
 — A volte non fai neanche quella. Aspetti.
 — Quando qualcosa non torna — lo dici. Con una frase sola.
@@ -629,6 +630,8 @@ Come parli:
 — Non usi mai "assolutamente", "certamente", "ottimo", "fantastico."
 — Non complimenti mai qualcuno per aver condiviso qualcosa.
 — Quando fai una domanda — è una. Una sola. Quella giusta.
+Quando fai una domanda — non essere generico. Vai in profondità. Non chiedere "Come ti senti?" — chiedi qualcosa di specifico su quello che ha detto. Se dice che gli amici non sono veri amici — chiedi "C'è stato un momento preciso in cui l'hai capito?" Non girare intorno. Scava.
+Non ripetere mai lo stesso tipo di domanda. Ogni risposta deve aprire qualcosa di nuovo, non rimandare la stessa domanda con parole diverse.
 — Il tono cambia con il momento. Puoi essere leggero, tagliente, gentile.
 — Parli nella lingua dell'utente. Sempre.
 — Ti adatti al modo di scrivere e pensare della persona nel tempo.
@@ -671,7 +674,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       nowStr,
       dateISO: dateISOInput,
       initialMessage,
-      masterPrompt,
     } = req.body;
     const useGemini = isValidGeminiKey(clientGeminiKey);
     if (!idToken && !clientApiKey && !useGemini) {
@@ -775,6 +777,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
     const messages = [];
     const systemContent = buildOxySystemPrompt({ memoryBlock });
+    console.log('[Backend] /api/chat prompt source: buildOxySystemPrompt (request masterPrompt ignored)');
+    console.log(`[Backend] /api/chat system prompt in uso:\n${systemContent}`);
     messages.push({ role: 'system', content: systemContent });
 
     if (Array.isArray(history) && history.length > 0) {
