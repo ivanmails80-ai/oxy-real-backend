@@ -1302,6 +1302,133 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
   }
 });
 
+app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
+    const { uid, email } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const billing = await readBilling(uid);
+    if (!billing) {
+      return res.json({
+        active: false,
+        status: 'none',
+        planId: null,
+        planName: null,
+        renewAt: null,
+        amount: null,
+        currency: null,
+      });
+    }
+
+    const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+    const status = String(billing?.status || 'none');
+    const planId = typeof billing?.planId === 'string' ? billing.planId : null;
+    const planName = planId ? PLAN_DISPLAY_NAMES[planId] || planId : null;
+    const active = mode === 'subscription' ? computeSubscriptionActive(billing) : status === 'paid';
+
+    const stripe = await getStripeClient();
+    if (!stripe || mode !== 'subscription') {
+      return res.json({
+        active,
+        status,
+        planId,
+        planName,
+        renewAt: null,
+        amount: null,
+        currency: null,
+      });
+    }
+
+    let subscription = null;
+    const billingSubId = typeof billing?.stripeSubscriptionId === 'string' ? billing.stripeSubscriptionId : '';
+    const billingCustomerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
+
+    if (billingSubId) {
+      try {
+        subscription = await stripe.subscriptions.retrieve(billingSubId);
+      } catch (_) {
+        subscription = null;
+      }
+    }
+
+    if (!subscription && billingCustomerId) {
+      try {
+        const list = await stripe.subscriptions.list({ customer: billingCustomerId, status: 'all', limit: 10 });
+        subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
+      } catch (_) {
+        subscription = null;
+      }
+    }
+
+    if (!subscription && email) {
+      try {
+        const customers = await stripe.customers.list({ email, limit: 5 });
+        const customer = customers.data[0];
+        if (customer) {
+          const list = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
+          subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
+        }
+      } catch (_) {
+        subscription = null;
+      }
+    }
+
+    const item = subscription?.items?.data?.[0];
+    const amountCents = item?.price?.unit_amount;
+    const currency = item?.price?.currency;
+    const renewAt = typeof subscription?.current_period_end === 'number'
+      ? new Date(subscription.current_period_end * 1000).toISOString()
+      : null;
+
+    return res.json({
+      active,
+      status: subscription?.status || status,
+      planId,
+      planName,
+      renewAt,
+      amount: typeof amountCents === 'number' ? amountCents / 100 : null,
+      currency: typeof currency === 'string' ? currency.toUpperCase() : null,
+    });
+  } catch (e) {
+    console.error('[Backend] GET /api/subscription/status error:', e);
+    return res.status(500).json({ error: 'Errore durante il caricamento dello stato abbonamento.' });
+  }
+});
+
+app.post('/api/subscription/portal', billingLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid, email } = await requireAuth(idToken);
+    if (!uid || !email) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const stripe = await getStripeClient();
+    if (!stripe) return res.status(503).json({ error: 'Stripe non configurato lato server.' });
+
+    const billing = await readBilling(uid);
+    let customerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
+
+    if (!customerId && email) {
+      const customers = await stripe.customers.list({ email, limit: 5 });
+      customerId = customers.data?.[0]?.id || '';
+    }
+
+    if (!customerId) {
+      return res.status(404).json({ error: 'Nessun customer Stripe trovato per questo account.' });
+    }
+
+    const returnUrl = (STRIPE_CANCEL_URL || 'https://oxyreal.it/settings').trim();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+    });
+    return res.json({ url: session.url });
+  } catch (e) {
+    console.error('[Backend] POST /api/subscription/portal error:', e);
+    return res.status(500).json({ error: 'Errore durante apertura portale abbonamento.' });
+  }
+});
+
 // POST /api/me/delete-account — Self-service: l'utente autenticato richiede la cancellazione del proprio account. Elimina da Firebase Auth e tutti i dati backend (chat, memoria, diario, billing, storie, usage, credits). Richiesto dal legale per GDPR (diritto all'oblio). Conferma avvocato: "È esattamente ciò che serve per essere GDPR compliant al 100%."
 app.post('/api/me/delete-account', billingLimiter, async (req, res) => {
   try {
