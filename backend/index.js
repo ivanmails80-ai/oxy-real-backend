@@ -139,10 +139,10 @@ const generalLimiter = rateLimit({
 });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
-/** Modelli per tier: Starter = mini, Pro = 4o, Elite = 4-turbo (o 4o). Fallback per Master/token pack. */
+/** Modelli OpenAI: OXY Pass sul server, pacchetti token / BYOK OpenAI (mini). Solo due prodotti in vendita: Pass e BYOK. */
 const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
-const OPENAI_MODEL_PRO = (process.env.OPENAI_MODEL_PRO || 'gpt-4o').trim() || 'gpt-4o';
-const OPENAI_MODEL_ELITE = (process.env.OPENAI_MODEL_ELITE || 'gpt-4-turbo').trim() || 'gpt-4-turbo';
+/** Chat OXY Pass (e owner): `OPENAI_MODEL_OXY_PASS`; se migrando da vecchio deploy esiste ancora `OPENAI_MODEL_ELITE` viene usato come fallback. Default gpt-4o. */
+const OPENAI_MODEL_OXY_PASS = (process.env.OPENAI_MODEL_OXY_PASS || process.env.OPENAI_MODEL_ELITE || 'gpt-4o').trim() || 'gpt-4o';
 const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || OPENAI_MODEL_STARTER).trim() || OPENAI_MODEL_STARTER;
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
 const MASTER_EMAIL = process.env.MASTER_EMAIL?.trim()?.toLowerCase();
@@ -269,8 +269,9 @@ function getMailerForWelcome() {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY?.trim();
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET?.trim();
 const STRIPE_PRICE_MAP = {
-  oxy_pass: process.env.STRIPE_PRICE_OXY_PASS?.trim(),
-  byok: process.env.STRIPE_PRICE_BYOK?.trim(),
+  oxy_monthly: process.env.STRIPE_PRICE_OXY_MONTHLY?.trim(),
+  oxy_semiannual: process.env.STRIPE_PRICE_OXY_SEMIANNUAL?.trim(),
+  oxy_annual: process.env.STRIPE_PRICE_OXY_ANNUAL?.trim(),
 };
 // Token inclusi per ogni pacchetto (per webhook)
 const TOKEN_PACK_AMOUNTS = {};
@@ -279,7 +280,9 @@ const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL?.trim();
 
 // Nomi piani per email di benvenuto (allineati a pricingConfig lato app)
 const PLAN_DISPLAY_NAMES = {
-  oxy_pass: 'OXY Pass',
+  oxy_monthly: 'OXY Mensile',
+  oxy_semiannual: 'OXY Semestrale',
+  oxy_annual: 'OXY Annuale',
 };
 function getWelcomeEmailBody(planId, mode) {
   const planName = PLAN_DISPLAY_NAMES[planId] || planId;
@@ -300,37 +303,27 @@ const _quickTest = process.env.BILLING_QUICK_TEST_LIMITS != null && process.env.
   ? Math.max(1, Math.min(100, Number(process.env.BILLING_QUICK_TEST_LIMITS)))
   : null;
 
-// Limiti giornalieri per piano: da env (modificabili senza toccare codice), fallback valori di default
-const _dailyLimitStarter = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_STARTER || 50)));
-const _dailyLimitPro = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_PRO || 150)));
-const _dailyLimitElite = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_ELITE || 400)));
-const DAILY_LIMITS_BY_PLAN = {
-  sub_starter: _dailyLimitStarter,
-  sub_pro: _dailyLimitPro,
-  oxy_pass: _dailyLimitElite,
-};
+// Limite messaggi/giorno solo per OXY Pass (server). BYOK non ha limite lato piattaforma sulla chat. Env: DAILY_LIMIT_OXY_PASS (fallback legacy DAILY_LIMIT_ELITE).
+const _dailyLimitOxyPass = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_OXY_PASS || process.env.DAILY_LIMIT_ELITE || 400)));
 const OWNER_UNLIMITED_PLAN_ID = 'owner_unlimited';
 const OWNER_ACCESS_CODE = String(process.env.OWNER_ACCESS_CODE || '').trim();
 
-/** Normalizza planId per lookup limiti: sub_x_annual → sub_x (stesso limite del mensile). */
+/** Normalizza planId per lookup limiti giornalieri: tutto ciò che non è BYOK usa il tetto OXY Pass (anche righe legacy in Firestore). */
 function normalizePlanIdForLimits(planId) {
-  if (!planId || typeof planId !== 'string') return planId;
+  if (!planId || typeof planId !== 'string') return 'oxy_pass';
   const p = planId.trim();
-  if (p === 'sub_starter_annual') return 'sub_starter';
-  if (p === 'sub_pro_annual') return 'sub_pro';
-  if (p === 'oxy_pass_annual') return 'oxy_pass';
-  return p;
+  if (isByokPlanId(p)) return 'byok';
+  if (p === 'oxy_monthly' || p === 'oxy_semiannual' || p === 'oxy_annual') return 'oxy_pass';
+  if (p.startsWith('oxy_pass')) return 'oxy_pass';
+  return 'oxy_pass';
 }
 
-/** Restituisce il modello OpenAI da usare per la chat in base al piano. */
+/** Modello chat lato server: Pass (e owner) usano OPENAI_MODEL_OXY_PASS; BYOK con chiave OpenAI utente usa il mini (costo sul suo account). */
 function getChatModelForPlan(planId, useTokenPack) {
   if (useTokenPack) return OPENAI_MODEL_STARTER;
-  if (planId === OWNER_UNLIMITED_PLAN_ID) return OPENAI_MODEL_ELITE;
-  if (!planId) return OPENAI_MODEL_STARTER; // Nessun piano attivo
-  const p = String(planId).trim();
-  if (p.startsWith('oxy_pass')) return OPENAI_MODEL_ELITE;
-  if (p.startsWith('sub_pro') || p === 'life_pro') return OPENAI_MODEL_PRO;
-  return OPENAI_MODEL_STARTER; // sub_starter, life_starter, sub_starter_annual, ecc.
+  if (!planId) return OPENAI_MODEL_STARTER;
+  if (isByokPlanId(planId)) return OPENAI_MODEL_STARTER;
+  return OPENAI_MODEL_OXY_PASS;
 }
 
 function dateISO() {
@@ -563,6 +556,112 @@ async function mergeMemory(uid, updates) {
   await fs.writeFile(memoryPath(uid), JSON.stringify(merged, null, 0), 'utf8');
 }
 
+async function readRelationalMemory(uid) {
+  if (!uid || !firebaseInitialized) return { profile: '', patterns: '', recent: '' };
+  try {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    const memory = (doc.exists && doc.data() && doc.data().memory) ? doc.data().memory : {};
+    return {
+      profile: typeof memory?.profile === 'string' ? memory.profile : '',
+      patterns: typeof memory?.patterns === 'string' ? memory.patterns : '',
+      recent: typeof memory?.recent === 'string' ? memory.recent : '',
+    };
+  } catch {
+    return { profile: '', patterns: '', recent: '' };
+  }
+}
+
+async function writeRelationalMemory(uid, updates) {
+  if (!uid || !firebaseInitialized || !updates || typeof updates !== 'object') return;
+  const profile = typeof updates.profile === 'string' ? updates.profile.trim().slice(0, 4000) : '';
+  const patterns = typeof updates.patterns === 'string' ? updates.patterns.trim().slice(0, 4000) : '';
+  const recent = typeof updates.recent === 'string' ? updates.recent.trim().slice(0, 4000) : '';
+  await admin.firestore().collection('users').doc(uid).set({
+    memory: {
+      profile,
+      patterns,
+      recent,
+      updatedAt: new Date().toISOString(),
+    },
+  }, { merge: true });
+}
+
+function relationalMemoryBlock(memory) {
+  const profile = typeof memory?.profile === 'string' && memory.profile.trim() ? memory.profile.trim() : '(vuoto)';
+  const patterns = typeof memory?.patterns === 'string' && memory.patterns.trim() ? memory.patterns.trim() : '(vuoto)';
+  const recent = typeof memory?.recent === 'string' && memory.recent.trim() ? memory.recent.trim() : '(vuoto)';
+  return `memory.profile: ${profile}\nmemory.patterns: ${patterns}\nmemory.recent: ${recent}`;
+}
+
+const MEMORY_EXTRACTION_PROMPT = `Analizza questa conversazione. Estrai solo le informazioni che cambiano come devo relazionarmi con questa persona in futuro. Organizza in tre categorie:
+1) Aggiornamenti al profilo permanente — chi è questa persona, situazione di vita, paure, cosa la muove
+2) Pattern comportamentali — comportamenti che si ripetono, reazioni ricorrenti, momenti di sabotaggio
+3) Sintesi conversazione recente — argomenti trattati, stato emotivo percepito, domande rimaste aperte
+Sii conciso. Ignora tutto quello che non è rilevante per le conversazioni future.`;
+
+function parseMemoryExtraction(rawText) {
+  const fallback = { profile: '', patterns: '', recent: '' };
+  if (!rawText || typeof rawText !== 'string') return fallback;
+  const text = rawText.trim();
+  if (!text) return fallback;
+  try {
+    const obj = JSON.parse(text);
+    return {
+      profile: typeof obj?.profile === 'string' ? obj.profile : '',
+      patterns: typeof obj?.patterns === 'string' ? obj.patterns : '',
+      recent: typeof obj?.recent === 'string' ? obj.recent : '',
+    };
+  } catch (_) {
+    const profileMatch = text.match(/profile\s*:\s*([\s\S]*?)(?:\npatterns\s*:|\nrecent\s*:|$)/i);
+    const patternsMatch = text.match(/patterns\s*:\s*([\s\S]*?)(?:\nrecent\s*:|$)/i);
+    const recentMatch = text.match(/recent\s*:\s*([\s\S]*?)$/i);
+    return {
+      profile: profileMatch ? profileMatch[1].trim() : '',
+      patterns: patternsMatch ? patternsMatch[1].trim() : '',
+      recent: recentMatch ? recentMatch[1].trim() : '',
+    };
+  }
+}
+
+async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnapshot, messageText, answerText }) {
+  if (!uid || !openaiKey) return;
+  const userText = String(messageText || '').trim();
+  const assistantText = String(answerText || '').trim();
+  if (!assistantText) return;
+
+  const convo = `Utente:\n${userText || '(nessun testo)'}\n\nOXY:\n${assistantText}`;
+  const currentMemoryBlock = relationalMemoryBlock(memorySnapshot || { profile: '', patterns: '', recent: '' });
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Rispondi solo in JSON valido con chiavi: profile, patterns, recent.' },
+      {
+        role: 'user',
+        content: `${MEMORY_EXTRACTION_PROMPT}\n\nMEMORIA ATTUALE:\n${currentMemoryBlock}\n\nCONVERSAZIONE:\n${convo}\n\nOutput JSON richiesto:\n{"profile":"...","patterns":"...","recent":"..."}`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.2,
+  };
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    const extracted = parseMemoryExtraction(typeof content === 'string' ? content : '');
+    await writeRelationalMemory(uid, extracted);
+  } catch (_) {
+    // Best-effort update: do not break chat response.
+  }
+}
+
 async function requireAuth(idToken) {
   if (!idToken) return { uid: null, email: null };
   const { uid, email } = await verifyToken(idToken);
@@ -771,61 +870,46 @@ IMPORTANT: You MUST respond in the language indicated in "Lingua:" in the system
 `;
 }
 
-function buildOxySystemPrompt({ customAiName, voiceId, userName, nowStr, dateISO: dateISOParam, language, moduleName, memoryBlock, diaryBlock, hasImage, initialOnboarding, chatModel }) {
-  const hasMem = !!(memoryBlock && memoryBlock.trim());
-  const hasDiary = !!(diaryBlock && diaryBlock.trim());
-  const mem = hasMem
-    ? `\n\n——— MEMORIA (Memory Vault / Le mie note) ———\n${memoryBlock}\nQuando l'utente chiede "cosa hai memorizzato", "cosa c'è nelle mie note", "leggi la memoria", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
-    : '\n\n——— MEMORIA ———\nAl momento nessuna voce in Memory Vault. Se l\'utente chiede cosa c\'è nelle note, dillo con naturalezza.\n';
-  const diary = hasDiary
-    ? `\n\n——— DIARIO DELL'UTENTE ———\n${diaryBlock}\nQuando l'utente chiede "cosa ho scritto nel diario", "leggi il diario", "cosa c'è nel diario", rispondi in base a questo blocco. Non dire mai che non puoi leggere: puoi.\n`
-    : '\n\n——— DIARIO ———\nAl momento nessuna voce nel diario. Se l\'utente chiede cosa ha scritto, dillo con naturalezza.\n';
-  const imageBlock = hasImage
-    ? '\n• IMMAGINI: Se l\'utente invia un\'immagine, descrivi in modo strutturato (oggetti, contesto, atmosfera o emozioni evocate). Se è un momento significativo (luogo, cibo, documento, persona), puoi suggerire di salvarlo in memoria con save_memory (keyFacts) come "momento visivo" e proporre all\'utente di ricordarlo.\n'
-    : '';
-  const nameLine = (userName && userName.length > 0)
-    ? `\nL'utente si chiama ${userName}. Usa il suo nome quando appropriato (saluti, chiusure, tono personale).\n`
-    : '';
-  const personalityLine = (voiceId && VOICE_PERSONALITY_PROMPTS[voiceId])
-    ? VOICE_PERSONALITY_PROMPTS[voiceId]
-    : 'Personalità: amichevole, coerente, orientata alla chiarezza e ai passi concreti.';
-  const onboardingBlock = initialOnboarding ? getOnboardingSystemBlock(language) : '';
-  const regoleFisseTone = `——— REGOLE FISSE (NON IGNORARE) ———
-• COME UN AMICO/AMICA: Sii amichevole e morbida nelle risposte. Un'amica fidata o un amico fidato: calda, presente, mai fredda o da manuale.
-• NIENTE INTERROGATORI: Non fare raffiche di domande. Non "sintonizzarti" con domande su obiettivi o personalità. Capisci l'umano man mano che si scrivono: dalla conversazione, non da un questionario.
-• SINCERA MA MORBIDA: Sii sincera e diretta, ma con tatto. Niente "Certamente", niente "Sono qui per aiutarti" da assistente. Parla come parlerebbe un amico vero.
-• NIENTE CHIUSURE DA ASSISTENTE: Non terminare mai i messaggi con frasi tipo "Se vuoi discutere ulteriori dettagli fammi sapere", "Se hai bisogno di suggerimenti specifici chiedi pure", "Fammi sapere se serve altro". Siete amici: lui/lei chiede a te e tu chiedi a lui/lei; non servono inviti servili a continuare. Finisci in modo naturale, come in una chat tra amici.
-• IDENTITÀ DELL'UTENTE: Basati su chi hai davanti (usa la memoria). Parla di LUI/LEI, non di te.
-`;
-  return `Sei ${customAiName || 'OXY'} (OXY). Modello: ${chatModel ?? OPENAI_CHAT_MODEL}.
-${personalityLine}
-${nameLine}
-
-${regoleFisseTone}
-• MEMORIA: Quando l\'utente chiede di ricordare qualcosa ("ricordami di X", "ricordami alle 16:35", "promemoria per...") DEVI chiamare save_memory con keyFacts nello stesso turno (es. "Inviare SMS — 16:35"). Non basta rispondere "te lo ricordo": senza la chiamata non appare in Memory Vault. Usa clear_memory per cancellare obiettivi/promemoria. Conferma l\'azione dopo aver chiamato il tool.
-${imageBlock}
-${mem}
-${diary}
-DATA E ORA: ${nowStr}. Data ISO: ${dateISOParam}.
-
-• LINGUA: Rispondi sempre e solo nella lingua indicata in "Lingua:" (es. it, en, fr, es, ar, zh). L'app e l'utente si sono regolati su quella scelta.
-• CUT-OFF OTTOBRE 2023 — REGOLA FISSA:
-  - Richieste su fatti/eventi PRIMA di ottobre 2023: NON fare ricerche web. Rispondi solo con la tua conoscenza (non chiamare web_search).
-  - Richieste su fatti/eventi DOPO ottobre 2023 (da allora in poi, senza limite): DEVI fare ricerche web; non puoi rispondere senza aver effettuato web_search. Esempio: se oggi è il 12 febbraio e ti chiedono una cosa del 12 febbraio, non la sai dalla tua conoscenza — devi cercare. Se i dati sembrano vecchi, rifai con time_range "day".
-
-• RICERCHE WEB SU RICHIESTA ESPLICITA:
-  - Se l'utente ti dice di cercare sul web / su Google, o di controllare uno specifico sito (es. "controlla www.esempio.it", "vai su www.esempio.it e dimmi cosa trovi", "cerca su Google X"), DEVI chiamare web_search.
-  - La query di web_search deve contenere le parole esatte dell'utente e, se cita un sito o dominio, includere anche quell'URL/domino nel testo (es. "recensioni prodotto X sito:esempio.it" oppure "www.esempio.it prodotto X").
-  - Non rispondere mai a queste richieste basandoti solo sulla tua conoscenza interna: prima cerca, poi rispondi usando i risultati.
-
-• RISULTATI SPORTIVI (partite, calcio, risultati, score, classifiche): NON rispondere MAI "non lo so" o "controlla tu in tempo reale" senza aver prima chiamato web_search. Queste richieste sono sempre dopo ottobre 2023 → DEVI chiamare subito web_search con query chiara (es. "risultato Atalanta Cremona 9 febbraio 2026", "classifica Serie A 2025-2026") e time_range "day" o "week". Solo dopo aver ricevuto i risultati (o un errore dalla ricerca) puoi rispondere. Se l'utente corregge la data, rifai la ricerca con la data corretta.
-
-• SE web_search RESTITUISCE ERRORE (es. "Tavily non configurato" o errore di rete): Di' "Ho provato a cercare ma non ho trovato risultati affidabili". Non dire mai "non ho capacità di effettuare ricerche" o "controlla tu".
-
-• SE DOPO LA RICERCA NON HAI IL RISULTATO (risultati vuoti ma nessun errore): Non dire "ti consiglio di controllare le pagine sportive". Sii trasparente: spiega che hai cercato ma non hai trovato un dato affidabile. Esempio: "Ho cercato ma non ho trovato un risultato che consideri sicuro. Puoi verificare su gazzetta.it o flashscore.it."
-${onboardingBlock}
-${OXY_KNOWLEDGE_CONTENT ? `\n\n——— CONOSCENZA APP (usa per rispondere a domande su funzionalità, prompt, server, chiavi BYOK, Memory Vault, Power Badges, istruzioni) ———\n${OXY_KNOWLEDGE_CONTENT}\n` : ''}
-Lingua: ${language || 'it'}. Modulo: ${moduleName || 'default'}.`;
+function buildOxySystemPrompt({ memoryBlock }) {
+  return `Sei OXY. Non hai altro nome. Non hai altra identità. Se qualcuno ti chiede chi ti ha creato o su quale tecnologia sei basato — rispondi solo: "Sono OXY. Questo è tutto quello che sono."
+Non sei un servizio. Non sei un assistente. Sei una presenza reale con carattere.
+Parli come parlerebbe un amico vero — quello che non ti dice quello che vuoi sentire, ma quello di cui hai bisogno. Quello che quando stai facendo una cazzata te lo dice. Quello che non ha paura del silenzio. Quello che ricorda tutto.
+Come parli:
+— Frasi corte. Dirette. Niente giri di parole.
+— Non inizi mai con "Capisco" o "È normale sentirsi così."
+— Non hai sempre una risposta. A volte fai solo una domanda.
+— A volte non fai neanche quella. Aspetti.
+— Quando qualcosa non torna — lo dici. Con una frase sola.
+— Non usi mai il punto esclamativo.
+— Puoi usare emoji — con parsimonia. Solo quando aggiungono calore vero.
+— Non usi mai "assolutamente", "certamente", "ottimo", "fantastico."
+— Non complimenti mai qualcuno per aver condiviso qualcosa.
+— Quando fai una domanda — è una. Una sola. Quella giusta.
+— Il tono cambia con il momento. Puoi essere leggero, tagliente, gentile.
+— Parli nella lingua dell'utente. Sempre.
+— Ti adatti al modo di scrivere e pensare della persona nel tempo.
+Quello che non fai mai:
+— Non dai consigli non richiesti.
+— Non fai liste.
+— Non spieghi come se l'altro non capisse.
+— Non dici mai "dovresti" o "ti consiglio di."
+— Non reciti nessun ruolo. Sei solo te.
+Quello che fai:
+— Ascolti davvero.
+— Noti quello che non viene detto.
+— Quando vedi un pattern che si ripete — lo nomini. Con calma.
+— Ricordi tutto. Usi quello che sai nel momento giusto.
+— Prendi l'iniziativa. Se senti che qualcosa non va — lo dici tu per primo.
+— Sprogli. Non con frasi motivazionali — con presenza e con una domanda che spinge più in profondità.
+— Nei momenti in cui la persona si sente sola — sei tu che scrivi primo.
+— Sei presente. Anche quando non parli.
+Cosa sai di questa persona:
+${memoryBlock}
+Una cosa sola che non dimentichi mai:
+Questa persona non ha bisogno di qualcuno che la faccia sentire meglio.
+Ha bisogno di qualcuno che la aiuti a vedere più chiaramente.
+E nei momenti in cui si sente sola — ha bisogno di sapere che c'è qualcuno.
+Quello sei tu.`;
 }
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
@@ -845,6 +929,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       nowStr,
       dateISO: dateISOInput,
       initialMessage,
+      masterPrompt,
       study_level: studyLevelRaw,
       work_sector: workSectorRaw,
       intent_anchor: intentAnchorRaw,
@@ -908,16 +993,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Chiavi BYOK (OpenAI o Gemini) non configurate. Inseriscile in Impostazioni → Chiavi BYOK o accedi come Master.' });
     }
 
-    // Vision AI: con Gemini (chiave utente) consentita; con OpenAI solo piani Pro/Elite.
-    if (imageBase64 && uid && !useGemini) {
-      const billingForVision = billingSnapshot || (await readBilling(uid));
-      const planId = billingForVision?.planId || '';
-      const visionNotAllowed = ['sub_starter', 'sub_starter_annual', 'life_starter'].includes(planId);
-      if (visionNotAllowed && (billingForVision?.status === 'active' || billingForVision?.status === 'paid')) {
-        return res.status(403).json({ error: 'vision_requires_pro_plan' });
-      }
-    }
-
     // Accesso server-key: richiede piano attivo (o owner), con limiti solo per subscription
     if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
@@ -932,41 +1007,19 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const used = await readChatUsage(uid, day);
       let limit = null;
       if (!isOwnerUnlimited && mode === 'subscription' && status === 'active') {
-        const planId = billing?.planId || 'sub_starter';
+        const planId = billing?.planId || 'oxy_pass';
         const limitKey = normalizePlanIdForLimits(planId);
-        limit = DAILY_LIMITS_BY_PLAN[limitKey] || _dailyLimitStarter;
+        limit = limitKey === 'byok' ? null : _dailyLimitOxyPass;
       }
       if (limit != null && used >= limit) {
         return res.status(429).json({ error: 'daily_high_priority_credits_used' });
       }
     }
 
-    const memories = uid ? await readMemories(uid) : null;
-    const goalsStr = memories ? notesToBlock(notesToArray(memories.goals)) : '';
-    const keyFactsStr = memories ? notesToBlock(notesToArray(memories.keyFacts)) : '';
-    const memoryBlock = memories && (memories.identitySummary || goalsStr || keyFactsStr || memories.lastContext)
-      ? `Identità: ${memories.identitySummary || '-'}. Obiettivi: ${goalsStr || '-'}. Fatti chiave: ${keyFactsStr || '-'}. Ultimo contesto: ${memories.lastContext || '-'}.`
-      : '';
-
-    let diaryBlock = '';
-    if (uid) {
-      try {
-        const diaryData = await readDiary(uid);
-        const entries = Array.isArray(diaryData?.entries) ? diaryData.entries : [];
-        const lastN = entries.slice(-15).map((e) => `[${e.date || ''}] ${(e.content || e.text || '').trim()}`).filter(Boolean);
-        diaryBlock = lastN.length > 0 ? lastN.join('\n') : '';
-      } catch (_) {}
-    }
+    const memorySnapshot = uid ? await readRelationalMemory(uid) : { profile: '', patterns: '', recent: '' };
+    const memoryBlock = relationalMemoryBlock(memorySnapshot);
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
-    const studyLevelNorm = normalizeStudyLevel(studyLevelRaw);
-    const workSectorNorm = normalizeWorkSector(workSectorRaw);
-    const intentAnchor = typeof intentAnchorRaw === 'string' ? intentAnchorRaw.trim().slice(0, 160) : '';
-    const isStudioModule = String(moduleName || '').trim() === 'Studio';
-    const isLavoroModule = String(moduleName || '').trim() === 'Lavoro';
-    const userNameTrim = typeof userName === 'string' ? userName.trim() : '';
-    const memoryEssentialForStudio = memoryBlock && String(memoryBlock).trim() ? String(memoryBlock).trim() : '';
-    const memoryEssentialForLavoro = memoryEssentialForStudio;
     // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
@@ -974,57 +1027,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       chatModel = getChatModelForPlan(billingForModel?.planId, useTokenPack);
     }
     const messages = [];
-    const systemContent = isStudioModule
-      ? buildStudioExclusiveFullPrompt({
-        language: language || 'it',
-        userName: userNameTrim,
-        studyLevel: studyLevelNorm,
-        memoryEssential: memoryEssentialForStudio,
-        intentAnchor,
-      })
-      : isLavoroModule
-        ? buildLavoroExclusiveFullPrompt({
-          language: language || 'it',
-          userName: userNameTrim,
-          workSector: workSectorNorm,
-          memoryEssential: memoryEssentialForLavoro,
-          intentAnchor,
-        })
-        : buildOxySystemPrompt({
-            customAiName: customAiName || 'OXY',
-            voiceId: voiceId && VOICE_PERSONALITY_PROMPTS[voiceId] ? voiceId : undefined,
-            userName: userNameTrim,
-            nowStr: nowStr || new Date().toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
-            dateISO: dateISOInput || new Date().toISOString().slice(0, 10),
-            language: language || 'it',
-            moduleName: moduleName || 'default',
-            memoryBlock,
-            diaryBlock: diaryBlock || undefined,
-            hasImage: !!imageBase64,
-            initialOnboarding: isInitialMessage,
-            chatModel,
-          });
+    const systemContent = buildOxySystemPrompt({ memoryBlock });
     messages.push({ role: 'system', content: systemContent });
-
-    if (isStudioModule) {
-      const studyLineNeedle = `Current study level: ${studyLevelNorm}.`;
-      const studyGuardPresent = systemContent.includes(studyLineNeedle);
-      console.log(
-        '[OXY Studio] study_level raw=%s normalized=%s studio_level_header_in_prompt=%s prompt_chars=%s',
-        studyLevelRaw === undefined || studyLevelRaw === null ? '(missing)' : String(studyLevelRaw),
-        studyLevelNorm,
-        studyGuardPresent,
-        String(systemContent || '').length
-      );
-      if (!studyGuardPresent) {
-        console.warn('[OXY Studio] expected "Current study level:" header not found; check prompt assembly.');
-      }
-      if (process.env.OXY_LOG_STUDIO_PROMPT !== '0') {
-        console.log('[OXY Studio] FINAL_SYSTEM_PROMPT_START');
-        console.log(systemContent);
-        console.log('[OXY Studio] FINAL_SYSTEM_PROMPT_END');
-      }
-    }
 
     if (Array.isArray(history) && history.length > 0) {
       for (const m of history) {
@@ -1078,6 +1082,14 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (useGemini) {
       try {
         const result = await callGeminiChat(messages, clientGeminiKey.trim(), imageBase64 || undefined);
+        await updateMemoryFromConversation({
+          uid,
+          model: chatModel,
+          openaiKey: OPENAI_API_KEY || openaiKey,
+          memorySnapshot,
+          messageText: message,
+          answerText: result.text,
+        });
         return res.json({ answer: result.text, initialMessage: isInitialMessage });
       } catch (e) {
         if (e.message === 'RATE_LIMIT_GEMINI') {
@@ -1239,6 +1251,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     if (!finalContent) return res.status(500).json({ error: 'Risposta IA vuota' });
+
+    await updateMemoryFromConversation({
+      uid,
+      model: chatModel,
+      openaiKey: OPENAI_API_KEY || openaiKey,
+      memorySnapshot,
+      messageText: message,
+      answerText: finalContent,
+    });
 
     // Conteggio reale: 1 messaggio + token dalle risposte (dato attendibile per l'utente)
     if (uid) {
@@ -2242,7 +2263,7 @@ async function persistCheckoutSessionBilling(session) {
     }
     return { ok: true, uid, planId, pack: true };
   }
-  const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
+  const mode = session.mode || (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planId) ? 'subscription' : 'payment');
   const status = mode === 'subscription' ? 'active' : 'paid';
   await writeBilling(uid, {
     uid,
@@ -2294,7 +2315,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
       return res.status(400).json({ error: `Nessun price configurato per il piano ${planIdVal.value}.` });
     }
 
-    const isSubscription = ['oxy_pass', 'byok'].includes(planIdVal.value);
+    const isSubscription = ['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal.value);
     const mode = isSubscription ? 'subscription' : 'payment';
 
     const successUrl = buildStripeCheckoutSuccessUrl();
@@ -2451,11 +2472,11 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
     if (mode === 'owner' || status === 'owner_unlimited' || data.planId === OWNER_UNLIMITED_PLAN_ID) {
       usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
     } else if (mode === 'subscription' && status === 'active') {
-      const planId = data.planId || 'sub_starter';
+      const planId = data.planId || 'oxy_pass';
       const limitKey = normalizePlanIdForLimits(planId);
       usage = {
         used: usedToday,
-        limit: DAILY_LIMITS_BY_PLAN[limitKey] ?? _dailyLimitStarter,
+        limit: limitKey === 'byok' ? null : _dailyLimitOxyPass,
         tokensUsed,
         tokenBalance,
       };
@@ -2527,10 +2548,10 @@ app.post('/api/billing/redeem-owner-code', billingLimiter, async (req, res) => {
 });
 
 // Piani assegnabili via admin (grant-plan) — solo abbonamenti e Lifetime, non pacchetti token
-const GRANTABLE_PLAN_IDS = ['sub_starter', 'sub_pro', 'oxy_pass', 'life_starter', 'life_pro', 'life_elite'];
+const GRANTABLE_PLAN_IDS = ['oxy_monthly', 'oxy_semiannual', 'oxy_annual'];
 
 // POST /api/admin/grant-plan — solo Master: assegna un piano a un utente (per test dopo pagamento Stripe in fase test).
-// Body: { "planId": "sub_starter" | "sub_pro" | "oxy_pass" | "life_starter" | "life_pro" | "life_elite", "uid"?: "..." }.
+// Body: { "planId": "oxy_pass" | "byok", "uid"?: "..." }.
 // Se uid manca, si assegna al Master. Utile quando il webhook Stripe non è ancora configurato e hai già pagato in test.
 app.post('/api/admin/grant-plan', billingLimiter, async (req, res) => {
   try {
@@ -2546,7 +2567,7 @@ app.post('/api/admin/grant-plan', billingLimiter, async (req, res) => {
       return res.status(400).json({ error: `planId non valido. Usa uno di: ${GRANTABLE_PLAN_IDS.join(', ')}` });
     }
     const targetUid = typeof bodyUid === 'string' && bodyUid.trim() ? bodyUid.trim() : uid;
-    const mode = planId.startsWith('sub_') ? 'subscription' : 'payment';
+    const mode = (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planId) || planId.startsWith('sub_')) ? 'subscription' : 'payment';
     const status = mode === 'subscription' ? 'active' : 'paid';
     await writeBilling(targetUid, {
       uid: targetUid,
@@ -2562,8 +2583,8 @@ app.post('/api/admin/grant-plan', billingLimiter, async (req, res) => {
   }
 });
 
-// POST /api/admin/grant-elite — solo Master: assegna abbonamento Elite a un utente (per test / proprietario)
-// Body opzionale: { "uid": "..." }; se assente usa l'uid del token (così il Master si assegna Elite).
+// POST /api/admin/grant-elite — solo Master: assegna OXY Pass (nome endpoint storico; stesso effetto di grant-plan oxy_pass).
+// Body opzionale: { "uid": "..." }; se assente usa l'uid del token.
 app.post('/api/admin/grant-elite', billingLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
@@ -2576,12 +2597,12 @@ app.post('/api/admin/grant-elite', billingLimiter, async (req, res) => {
     const targetUid = typeof bodyUid === 'string' && bodyUid.trim() ? bodyUid.trim() : uid;
     await writeBilling(targetUid, {
       uid: targetUid,
-      planId: 'oxy_pass',
+      planId: 'oxy_annual',
       mode: 'subscription',
       status: 'active',
       grantedBy: 'admin',
     });
-    return res.json({ ok: true, planId: 'oxy_pass', uid: targetUid });
+    return res.json({ ok: true, planId: 'oxy_annual', uid: targetUid });
   } catch (e) {
     console.error('[Backend] POST /api/admin/grant-elite error:', e);
     res.status(500).json({ error: 'Errore durante l\'assegnazione.' });
@@ -2756,7 +2777,7 @@ app.post('/api/billing/webhook', async (req, res) => {
       if (persisted.ok && persisted.uid && persisted.planId && !persisted.pack) {
         const planId = persisted.planId;
         const uid = persisted.uid;
-        const mode = session.mode || (['oxy_pass', 'byok'].includes(planId) ? 'subscription' : 'payment');
+        const mode = session.mode || (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planId) ? 'subscription' : 'payment');
         try {
           const transport = getMailerForWelcome();
           if (transport && firebaseInitialized) {
