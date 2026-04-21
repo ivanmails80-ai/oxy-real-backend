@@ -398,12 +398,18 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_A
 }
 
 async function verifyToken(idToken) {
-  if (!firebaseInitialized) return { email: null, uid: null };
+  if (!firebaseInitialized) return { email: null, uid: null, signInProvider: null, emailVerified: true };
   try {
     const decoded = await admin.auth().verifyIdToken(idToken);
-    return { email: (decoded.email || '').toLowerCase(), uid: decoded.uid };
+    const signInProvider = decoded.firebase?.sign_in_provider || null;
+    return {
+      email: (decoded.email || '').toLowerCase(),
+      uid: decoded.uid,
+      signInProvider,
+      emailVerified: !!decoded.email_verified,
+    };
   } catch (e) {
-    return { email: null, uid: null };
+    return { email: null, uid: null, signInProvider: null, emailVerified: false };
   }
 }
 
@@ -551,9 +557,43 @@ async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnaps
 }
 
 async function requireAuth(idToken) {
-  if (!idToken) return { uid: null, email: null };
-  const { uid, email } = await verifyToken(idToken);
-  return { uid, email };
+  if (!idToken) return { uid: null, email: null, signInProvider: null, emailVerified: true };
+  return await verifyToken(idToken);
+}
+
+/** Firebase: account email/password senza verifica non accede a chat/cronologia. */
+function authMustVerifyEmail(authData) {
+  if (!authData || authData.signInProvider !== 'password') return false;
+  return !authData.emailVerified;
+}
+
+/** Piano che consente chat con chiave server (OXY Pass / Lifetime / owner). Escluso solo pacchetto token senza piano. */
+function computePaidChatAccess(billing) {
+  if (!billing) {
+    return {
+      hasPlan: false,
+      status: 'none',
+      mode: 'payment',
+      isOwnerUnlimited: false,
+      isSubscription: false,
+      isLifetimePaid: false,
+    };
+  }
+  const status = billing?.status || 'none';
+  const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+  const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
+  const isSubscription = mode === 'subscription' && status === 'active';
+  const isLifetimePaid = mode === 'payment' && status === 'paid';
+  const hasPlan = isOwnerUnlimited || isSubscription || isLifetimePaid;
+  return { hasPlan, status, mode, isOwnerUnlimited, isSubscription, isLifetimePaid };
+}
+
+/** Cronologia/salvataggio messaggi: stessi diritti della chat server-side (piano OXY o credito token). */
+async function canUseChatPersistence(uid, billingSnapshot = null) {
+  if (!uid) return false;
+  const billing = billingSnapshot != null ? billingSnapshot : await readBilling(uid);
+  if (computePaidChatAccess(billing).hasPlan) return true;
+  return (await readTokenBalance(uid)) > 0;
 }
 
 // Validazione input rigorosa (audit 8.2 - hardening produzione)
@@ -687,12 +727,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (idToken && firebaseInitialized) {
       // Regola:
       // - Master: usa OPENAI_API_KEY (se presente)
-      // - Utente con abbonamento attivo (subscription): usa OPENAI_API_KEY (se presente)
-      // - Lifetime / nessun piano: richiede apiKey client (chiavi BYOK / OpenAI personale)
+      // - Abbonamento attivo, Lifetime pagato o owner: OPENAI_API_KEY (se presente e piano non BYOK-only)
+      // - Altrimenti: chiavi BYOK / Gemini, oppure credito pacchetto token sulla chiave server
       try {
         const authData = await requireAuth(idToken);
         uid = authData?.uid || null;
         const email = authData?.email || null;
+        if (uid && authMustVerifyEmail(authData) && !isMaster(email)) {
+          return res.status(403).json({ error: 'Verifica la tua email prima di usare OXY in chat.' });
+        }
         isMasterUser = !!(email && isMaster(email));
         if (isMasterUser && OPENAI_API_KEY) {
           openaiKey = OPENAI_API_KEY;
@@ -702,12 +745,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
           const status = billing?.status || 'none';
           const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
           const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
-          const active = mode === 'subscription'
-            ? computeSubscriptionActive(billing)
-            : status === 'paid';
           const planIdForKey = billing?.planId || '';
-          const allowServerOpenAi =
-            isOwnerUnlimited || (active && mode === 'subscription' && !isByokPlanId(planIdForKey));
+          const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing) && !isByokPlanId(planIdForKey);
+          const lifetimeOk = mode === 'payment' && status === 'paid' && !isByokPlanId(planIdForKey);
+          const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk;
           if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
       } catch (_) {
@@ -742,20 +783,17 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
     lastChatMessageAtByKey.set(requestKey, nowMs);
 
-    // Accesso server-key: richiede piano attivo (o owner), con limiti solo per subscription
-    if (uid && openaiKey === OPENAI_API_KEY && !useTokenPack && !isMasterUser) {
+    // Accesso OPENAI_API_KEY di bordo: piano (subscription / lifetime / owner) oppure pacchetto token; limiti giornalieri solo su subscription.
+    if (uid && openaiKey === OPENAI_API_KEY && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
-      const status = billing?.status || 'none';
-      const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
-      const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
-      const isSubscription = mode === 'subscription' && status === 'active';
-      if (!isOwnerUnlimited && !isSubscription) {
+      const paid = computePaidChatAccess(billing);
+      if (!paid.hasPlan && !useTokenPack) {
         return res.status(403).json({ error: 'Nessun piano attivo. Attiva un abbonamento o un piano Lifetime per continuare.' });
       }
       const day = dateISO();
       const used = await readChatUsage(uid, day);
       let limit = null;
-      if (!isOwnerUnlimited && mode === 'subscription' && status === 'active') {
+      if (!paid.isOwnerUnlimited && paid.isSubscription) {
         const planId = billing?.planId || 'oxy_pass';
         const limitKey = normalizePlanIdForLimits(planId);
         limit = limitKey === 'byok' ? null : _dailyLimitOxyPass;
@@ -966,8 +1004,16 @@ app.get('/health', (req, res) => res.json({
 app.get('/api/chat/history', generalLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
-    const { uid } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido', messages: [] });
+    const email = authData?.email || null;
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email per accedere alla cronologia.', messages: [] });
+    }
+    if (!isMaster(email) && !(await canUseChatPersistence(uid))) {
+      return res.status(403).json({ error: 'Nessun piano attivo o credito insufficiente.', messages: [] });
+    }
     const messages = await readChat(uid);
     res.json({ messages });
   } catch (e) {
@@ -979,8 +1025,16 @@ app.get('/api/chat/history', generalLimiter, async (req, res) => {
 app.post('/api/chat/history', generalLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
-    const { uid } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    const email = authData?.email || null;
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email per accedere alla cronologia.', messages: [] });
+    }
+    if (!isMaster(email) && !(await canUseChatPersistence(uid))) {
+      return res.status(403).json({ error: 'Nessun piano attivo o credito insufficiente.', messages: [] });
+    }
     const messages = await readChat(uid);
     res.json({ messages });
   } catch (e) {
@@ -993,8 +1047,16 @@ app.post('/api/chat/messages', generalLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
     const { role, content } = req.body || {};
-    const { uid } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    const email = authData?.email || null;
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email per salvare i messaggi in chat.' });
+    }
+    if (role === 'user' && !isMaster(email) && !(await canUseChatPersistence(uid))) {
+      return res.status(403).json({ error: 'Nessun piano attivo o credito insufficiente.' });
+    }
     if (!role || content == null) return res.status(400).json({ error: 'role e content richiesti' });
     await appendMessage(uid, role, content);
     res.json({ ok: true });
