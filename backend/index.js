@@ -1268,6 +1268,7 @@ async function resolveStripeSubscriptionForUser(stripe, billing = null, email = 
 
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
+  let requestedPlanId = '';
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
     const authData = await requireAuth(idToken);
@@ -1279,6 +1280,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     }
 
     const { planId } = req.body || {};
+    requestedPlanId = String(planId || '').trim();
 
     // Validazione input rigorosa
     const planIdVal = validateString(planId, 'planId', 50, 1);
@@ -1329,6 +1331,12 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     return res.json({ url: session.url });
   } catch (e) {
     console.error('[Backend] POST /api/billing/checkout error:', e);
+    const stripeDetail = String(e?.raw?.message || e?.message || '').trim();
+    if (stripeDetail) {
+      return res.status(400).json({
+        error: `Checkout Stripe non riuscito${requestedPlanId ? ` (${requestedPlanId})` : ''}: ${stripeDetail}`,
+      });
+    }
     res.status(500).json({ error: 'Errore durante la creazione della sessione di pagamento. Riprova più tardi.' });
   }
 });
