@@ -1158,8 +1158,13 @@ function buildStripeCheckoutSuccessUrl() {
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
-    const { uid, email } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
     if (!uid || !email) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email prima di effettuare un acquisto.' });
+    }
 
     const { planId } = req.body || {};
 
@@ -1220,8 +1225,13 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
 app.post('/api/billing/confirm-session', billingLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
-    const { uid } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email prima di confermare il pagamento.' });
+    }
 
     const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
     if (!sessionId || !sessionId.startsWith('cs_')) {
@@ -1266,8 +1276,13 @@ app.post('/api/billing/confirm-session', billingLimiter, async (req, res) => {
 app.get('/api/billing/wait-active', billingPollLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
-    const { uid } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email per continuare.' });
+    }
     const billing = await readBilling(uid);
     const active = billing ? computeSubscriptionActive(billing) : false;
     return res.json({ active });
@@ -1281,9 +1296,14 @@ app.get('/api/billing/wait-active', billingPollLimiter, async (req, res) => {
 app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
-    const { uid, email } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
     if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
     const isOwnerMaster = !!(email && isMaster(email));
+    if (authMustVerifyEmail(authData) && !isOwnerMaster) {
+      return res.status(403).json({ error: 'Verifica la tua email per vedere lo stato di fatturazione.' });
+    }
     if (isOwnerMaster) {
       const day = dateISO();
       const used = await readChatUsage(uid, day);
