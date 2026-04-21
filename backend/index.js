@@ -232,6 +232,17 @@ const PLAN_DISPLAY_NAMES = {
   oxy_semiannual: 'OXY Semestrale',
   oxy_annual: 'OXY Annuale',
 };
+const LEGACY_PRICE_TO_PLAN = {
+  'price_1TN7PHGmOoq3tAJhVzPdMTOH': 'oxy_monthly',
+  'price_1TN7RHGmOoq3tAJh2L9PO1sJ': 'oxy_monthly',
+};
+function resolvePlanIdFromPriceId(priceId) {
+  if (!priceId || typeof priceId !== 'string') return null;
+  for (const [planId, mappedPriceId] of Object.entries(STRIPE_PRICE_MAP)) {
+    if (mappedPriceId && mappedPriceId === priceId) return planId;
+  }
+  return LEGACY_PRICE_TO_PLAN[priceId] || null;
+}
 function getWelcomeEmailBody(planId, mode) {
   const planName = PLAN_DISPLAY_NAMES[planId] || planId;
   const planType = mode === 'subscription' ? 'subscription' : 'one-time purchase';
@@ -1158,15 +1169,6 @@ function buildStripeCheckoutSuccessUrl() {
   return `${base}${join}paid=1&session_id={CHECKOUT_SESSION_ID}`;
 }
 
-function computePlanNaturalExpiry(planId, now = new Date()) {
-  const end = new Date(now);
-  if (planId === 'oxy_monthly') end.setMonth(end.getMonth() + 1);
-  else if (planId === 'oxy_semiannual') end.setMonth(end.getMonth() + 6);
-  else if (planId === 'oxy_annual') end.setFullYear(end.getFullYear() + 1);
-  else return null;
-  return Math.floor(end.getTime() / 1000);
-}
-
 async function ensureLegacySubscriptionNaturalExpiry(stripe, subscription) {
   if (!stripe || !subscription?.id) return subscription;
   const legacyAutoRenew =
@@ -1182,6 +1184,45 @@ async function ensureLegacySubscriptionNaturalExpiry(stripe, subscription) {
     console.error('[Backend] legacy subscription normalization error:', e?.message || e);
     return subscription;
   }
+}
+
+async function resolveStripeSubscriptionForUser(stripe, billing = null, email = null) {
+  if (!stripe) return null;
+  let subscription = null;
+  const billingSubId = typeof billing?.stripeSubscriptionId === 'string' ? billing.stripeSubscriptionId : '';
+  const billingCustomerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
+
+  if (billingSubId) {
+    try {
+      subscription = await stripe.subscriptions.retrieve(billingSubId);
+    } catch (_) {
+      subscription = null;
+    }
+  }
+
+  if (!subscription && billingCustomerId) {
+    try {
+      const list = await stripe.subscriptions.list({ customer: billingCustomerId, status: 'all', limit: 10 });
+      subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
+    } catch (_) {
+      subscription = null;
+    }
+  }
+
+  if (!subscription && email) {
+    try {
+      const customers = await stripe.customers.list({ email, limit: 5 });
+      const customer = customers.data[0];
+      if (customer) {
+        const list = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
+        subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
+      }
+    } catch (_) {
+      subscription = null;
+    }
+  }
+
+  return subscription;
 }
 
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
@@ -1227,7 +1268,6 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const successUrl = buildStripeCheckoutSuccessUrl();
     const cancelUrl = STRIPE_CANCEL_URL || 'https://www.oxyreal.it/settings/billing';
 
-    const naturalExpiryUnix = computePlanNaturalExpiry(planIdVal.value);
     const session = await stripe.checkout.sessions.create({
       mode,
       success_url: successUrl,
@@ -1243,10 +1283,10 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
         uid,
         planId: planIdVal.value,
       },
-      ...(isSubscription && naturalExpiryUnix
+      ...(isSubscription
         ? {
             subscription_data: {
-              cancel_at: naturalExpiryUnix,
+              cancel_at_period_end: true,
             },
           }
         : {}),
@@ -1383,6 +1423,17 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
     }
     const status = data.status || 'unknown';
     const mode = data.mode || (data.planId && String(data.planId).startsWith('sub_') ? 'subscription' : 'payment');
+    let planId = data.planId || null;
+    if (mode === 'subscription' && !planId) {
+      const stripe = await getStripeClient();
+      const subscription = await resolveStripeSubscriptionForUser(stripe, data, email);
+      const priceId = subscription?.items?.data?.[0]?.price?.id || null;
+      const inferredPlanId = resolvePlanIdFromPriceId(priceId);
+      if (inferredPlanId) {
+        planId = inferredPlanId;
+        await writeBilling(uid, { ...data, uid, planId: inferredPlanId, mode: 'subscription', status: 'active' });
+      }
+    }
     // Regola:
     // - subscription → attivo se status === active
     // - payment (Lifetime/one-shot) → attivo se status === paid
@@ -1409,7 +1460,7 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
     res.json({
       active,
       status,
-      planId: data.planId || null,
+      planId,
       mode,
       usage,
       ...(status === 'owner_unlimited' ? { ownerUnlimited: true } : {}),
@@ -1441,8 +1492,8 @@ app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
 
     const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
     const status = String(billing?.status || 'none');
-    const planId = typeof billing?.planId === 'string' ? billing.planId : null;
-    const planName = planId ? PLAN_DISPLAY_NAMES[planId] || planId : null;
+    let planId = typeof billing?.planId === 'string' ? billing.planId : null;
+    let planName = planId ? PLAN_DISPLAY_NAMES[planId] || planId : null;
     const active = mode === 'subscription' ? computeSubscriptionActive(billing) : status === 'paid';
 
     const stripe = await getStripeClient();
@@ -1458,41 +1509,18 @@ app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
       });
     }
 
-    let subscription = null;
-    const billingSubId = typeof billing?.stripeSubscriptionId === 'string' ? billing.stripeSubscriptionId : '';
-    const billingCustomerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
-
-    if (billingSubId) {
-      try {
-        subscription = await stripe.subscriptions.retrieve(billingSubId);
-      } catch (_) {
-        subscription = null;
-      }
-    }
-
-    if (!subscription && billingCustomerId) {
-      try {
-        const list = await stripe.subscriptions.list({ customer: billingCustomerId, status: 'all', limit: 10 });
-        subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
-      } catch (_) {
-        subscription = null;
-      }
-    }
-
-    if (!subscription && email) {
-      try {
-        const customers = await stripe.customers.list({ email, limit: 5 });
-        const customer = customers.data[0];
-        if (customer) {
-          const list = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
-          subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
-        }
-      } catch (_) {
-        subscription = null;
-      }
-    }
+    let subscription = await resolveStripeSubscriptionForUser(stripe, billing, email);
 
     subscription = await ensureLegacySubscriptionNaturalExpiry(stripe, subscription);
+    if (!planId) {
+      const priceId = subscription?.items?.data?.[0]?.price?.id || null;
+      const inferredPlanId = resolvePlanIdFromPriceId(priceId);
+      if (inferredPlanId) {
+        planId = inferredPlanId;
+        planName = PLAN_DISPLAY_NAMES[inferredPlanId] || inferredPlanId;
+        await writeBilling(uid, { ...billing, uid, planId: inferredPlanId, mode: 'subscription', status: 'active' });
+      }
+    }
     const item = subscription?.items?.data?.[0];
     const amountCents = item?.price?.unit_amount;
     const currency = item?.price?.currency;
@@ -1671,12 +1699,7 @@ app.post('/api/billing/webhook', async (req, res) => {
       if (uid && subscription.status === 'active') {
         const current = (await readBilling(uid)) || {};
         const priceId = subscription.items?.data?.[0]?.price?.id || null;
-        // Price ID legacy: mappati sui piani OXY Pass attuali (niente più prodotto BYOK separato).
-        const PRICE_TO_PLAN = {
-          'price_1TN7PHGmOoq3tAJhVzPdMTOH': 'oxy_monthly',
-          'price_1TN7RHGmOoq3tAJh2L9PO1sJ': 'oxy_monthly',
-        };
-        const planId = PRICE_TO_PLAN[priceId] || current.planId || subscription.metadata?.planId || null;
+        const planId = resolvePlanIdFromPriceId(priceId) || current.planId || subscription.metadata?.planId || null;
         await writeBilling(uid, {
           ...current,
           uid,
