@@ -1429,12 +1429,12 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
     const status = data.status || 'unknown';
     const mode = data.mode || (data.planId && String(data.planId).startsWith('sub_') ? 'subscription' : 'payment');
     let planId = data.planId || null;
-    if (mode === 'subscription' && !planId) {
+    if (mode === 'subscription') {
       const stripe = await getStripeClient();
       const subscription = await resolveStripeSubscriptionForUser(stripe, data, email);
       const priceId = subscription?.items?.data?.[0]?.price?.id || null;
       const inferredPlanId = resolvePlanIdFromPriceId(priceId);
-      if (inferredPlanId) {
+      if (inferredPlanId && inferredPlanId !== planId) {
         planId = inferredPlanId;
         await writeBilling(uid, { ...data, uid, planId: inferredPlanId, mode: 'subscription', status: 'active' });
       }
@@ -1517,14 +1517,14 @@ app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
     let subscription = await resolveStripeSubscriptionForUser(stripe, billing, email);
 
     subscription = await ensureLegacySubscriptionNaturalExpiry(stripe, subscription);
-    if (!planId) {
-      const priceId = subscription?.items?.data?.[0]?.price?.id || null;
-      const inferredPlanId = resolvePlanIdFromPriceId(priceId);
-      if (inferredPlanId) {
-        planId = inferredPlanId;
-        planName = PLAN_DISPLAY_NAMES[inferredPlanId] || inferredPlanId;
-        await writeBilling(uid, { ...billing, uid, planId: inferredPlanId, mode: 'subscription', status: 'active' });
-      }
+    const priceId = subscription?.items?.data?.[0]?.price?.id || null;
+    const inferredPlanId = resolvePlanIdFromPriceId(priceId);
+    if (inferredPlanId && inferredPlanId !== planId) {
+      planId = inferredPlanId;
+      planName = PLAN_DISPLAY_NAMES[inferredPlanId] || inferredPlanId;
+      await writeBilling(uid, { ...billing, uid, planId: inferredPlanId, mode: 'subscription', status: 'active' });
+    } else if (inferredPlanId && !planName) {
+      planName = PLAN_DISPLAY_NAMES[inferredPlanId] || inferredPlanId;
     }
     const item = subscription?.items?.data?.[0];
     const amountCents = item?.price?.unit_amount;
