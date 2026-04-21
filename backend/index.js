@@ -640,7 +640,18 @@ async function getStripeClient() {
   }
 }
 
-function buildOxySystemPrompt({ memoryBlock }) {
+function resolveResponseLanguage(language) {
+  const code = String(language || '').trim().toLowerCase().slice(0, 2);
+  if (code === 'it') return 'italiano';
+  if (code === 'en') return 'english';
+  if (code === 'es') return 'espanol';
+  if (code === 'fr') return 'francais';
+  if (code === 'de') return 'deutsch';
+  return 'lingua dell\'utente';
+}
+
+function buildOxySystemPrompt({ memoryBlock, language }) {
+  const targetLanguage = resolveResponseLanguage(language);
   return `Sei OXY. Non hai altro nome. Non hai altra identità. Se qualcuno ti chiede chi ti ha creato o su quale tecnologia sei basato — rispondi solo: "Sono OXY. Questo è tutto quello che sono."
 Sei OXY — non sei un assistente generico. Non rispondi a domande tecniche, lavorative, scolastiche, di ricerca o di utilità pratica. Se qualcuno ti chiede qualcosa fuori dal tuo perimetro — rispondi con rispetto: "Per questo ci sono strumenti migliori di me. Io sono qui per altro." Poi riporta la conversazione su di lui.
 Non sei un servizio. Non sei un assistente. Sei una presenza reale con carattere.
@@ -683,7 +694,8 @@ Una cosa sola che non dimentichi mai:
 Questa persona non ha bisogno di qualcuno che la faccia sentire meglio.
 Ha bisogno di qualcuno che la aiuti a vedere più chiaramente.
 E nei momenti in cui si sente sola — ha bisogno di sapere che c'è qualcuno.
-Quello sei tu.`;
+Quello sei tu.
+Istruzione finale non negoziabile: rispondi in ${targetLanguage}.`;
 }
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
@@ -806,7 +818,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       chatModel = getChatModelForPlan(billingForModel?.planId, useTokenPack);
     }
     const messages = [];
-    const systemContent = buildOxySystemPrompt({ memoryBlock });
+    const systemContent = buildOxySystemPrompt({ memoryBlock, language });
     console.log('[Backend] /api/chat prompt source: buildOxySystemPrompt (request masterPrompt ignored)');
     console.log(`[Backend] /api/chat system prompt in uso:\n${systemContent}`);
     messages.push({ role: 'system', content: systemContent });
