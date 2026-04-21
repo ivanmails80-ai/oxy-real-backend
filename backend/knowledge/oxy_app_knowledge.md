@@ -1,6 +1,6 @@
 # Conoscenza OXY Real — per l’assistente IA
 
-Questo documento è **l’unica fonte di verità** che l’assistente ha su OXY Real. Contiene **tutte** le funzionalità dell’app e le istruzioni su come funzionano. Usalo sempre quando l’utente chiede “cosa puoi fare”, “come funziona”, “come si fa a…”, “dove trovo…”, “cos’è il piano BYOK”, “dove inserisco le chiavi API”, “puoi inviarmi notifiche”, “ricordami gli appuntamenti”, ecc. Rispondi in modo esaustivo e pratico, nella lingua dell’utente. **Non dire mai di non avere accesso a istruzioni o documentazione: le hai, sono in questo file.**
+Questo documento è **l’unica fonte di verità** che l’assistente ha su OXY Real. Contiene **tutte** le funzionalità dell’app e le istruzioni su come funzionano. Usalo sempre quando l’utente chiede “cosa puoi fare”, “come funziona”, “come si fa a…”, “dove trovo…”, “cos’è l’abbonamento”, “dove gestisco il piano”, “puoi inviarmi notifiche”, “ricordami gli appuntamenti”, ecc. Rispondi in modo esaustivo e pratico, nella lingua dell’utente. **Non dire mai di non avere accesso a istruzioni o documentazione: le hai, sono in questo file.**
 
 ---
 
@@ -39,7 +39,7 @@ Questo documento è **l’unica fonte di verità** che l’assistente ha su OXY 
 
 ### 2.5 Voce (TTS)
 - Opzione per **far leggere ad alta voce** le risposte (sintesi vocale). In impostazioni si può scegliere la voce e abilitare la risposta vocale.
-- La prova voce è disponibile dal menu senza dover configurare chiavi personali BYOK.
+- La prova voce è disponibile dal menu; su web può servire una chiave OpenAI personale solo per sintesi/trascizione se configurata nelle impostazioni voce (non per la chat testuale sul server).
 
 ### 2.6 Appuntamenti e promemoria locali (notifiche sul telefono)
 - **Sì, puoi aiutare l’utente a ricevere notifiche e promemoria.** Quando chiedono “puoi inviarmi notifiche?”, “puoi ricordarmi gli appuntamenti?”, “puoi avvisarmi?”, rispondi **SÌ**: possono scrivere in chat frasi come **“ricordami alle 19 di chiamare Marco”**, **“promemoria per le 15:30: meeting con il capo”**, **“avvisami alle 20 di prendere la medicina”**. L’app riconosce data/ora e testo e **imposta una notifica sul telefono** (oltre a salvare in Memory Vault). **Non dire mai “non posso” per i promemoria: puoi.** L’unica condizione è che l’utente formuli in modo chiaro con l’ora (es. “ricordami alle 19 di …”).
@@ -72,16 +72,12 @@ Questo documento è **l’unica fonte di verità** che l’assistente ha su OXY 
 ### 3.1 Login
 - **Email/password** (Firebase Auth).
 - Se configurato: **Google** o **Apple** (Sign-in).
-- Esiste un utente **“Master”** (configurato lato server): usa le chiavi API gestite dal server e non deve configurare chiavi personali BYOK.
+- Esiste un utente **“Master”** (configurato lato server): usa le chiavi API gestite dal server.
 
-### 3.2 Chiavi BYOK (OpenAI / Google Gemini)
-- **Cos’è**: chiavi API personali (**OpenAI** `sk-…` e/o **Google Gemini**) che l’utente salva nelle **impostazioni** (su web: **Impostazioni → Chiavi BYOK**).
-- **Quando serve**:
-  - Con piano **BYOK** (abbonamento “bring your own key”): l’utente **deve** avere almeno una chiave valida salvata; la chat e le funzioni che usano l’IA passano da quelle chiavi (costi a carico dell’utente presso OpenAI/Google).
-  - Con **OXY Pass** (abbonamento classico): le richieste chat usano in genere le chiavi gestite dal **server**; l’utente **non** deve inserire chiavi personali per l’uso standard.
-  - Con **Lifetime** (una tantum) o senza abbonamento attivo: di solito serve una **chiave OpenAI personale** per chat e Vision; i costi API restano a carico dell’utente.
-- **Dove si inseriscono**: Menu → Impostazioni → **Chiavi BYOK** (su web il percorso è `/settings/chiavi-byok`). L’app salva in modo sicuro sul dispositivo e invia la chiave al backend solo quando serve.
-- **Sicurezza**: non condividere mai le chiavi API; sono personali e abilitano l’uso del proprio account OpenAI o Google AI.
+### 3.2 Chat sul server (web e app collegate al backend)
+- La **chat testuale** con OXY sul backend usa il **token Firebase** e le **chiavi OpenAI gestite dal server** quando l’utente ha un **piano attivo** (OXY Pass in abbonamento), un **Lifetime** pagato, **credito token**, oppure è il **Master**.
+- **Non** è più il modello “BYOK” (bring your own key) per la chat: l’utente non aggira il piano inserendo chiavi Gemini/OpenAI per la conversazione principale. Per attivare la chat serve **Abbonamento / Lifetime / token** da schermata dedicata.
+- Opzionale su web: chiavi OpenAI in impostazioni possono servire solo a funzioni **voce** (TTS / dettatura) se l’app le usa così; non sostituiscono il piano per la chat sul server.
 
 ### 3.3 Come sapere se l’app è collegata al server
 - L’app si connette a un **backend** (server) per: chat persistente, memoria (Memory Vault), billing, voce/TTS.
@@ -92,11 +88,10 @@ Questo documento è **l’unica fonte di verità** che l’assistente ha su OXY 
 
 ## 4. Piani e abbonamenti (OXY Pass)
 
-- **OXY Pass Starter**: compagno quotidiano “leggero”; include Memory Vault (base), storie, diario, voci base, limite messaggi giornalieri (es. 50); accesso tramite **chiavi OpenAI gestite dal server** (nessuna chiave personale richiesta per l’uso incluso).
+- **OXY Pass Starter**: compagno quotidiano “leggero”; include Memory Vault (base), storie, diario, voci base, limite messaggi giornalieri (es. 50); accesso tramite **chiavi OpenAI gestite dal server** (nessuna chiave personale richiesta per la chat inclusa).
 - **OXY Pass Pro**: per uso professionale quotidiano; Memory Vault estesa, storie, diario, community, voci complete, limite messaggi più alto (es. 150); come sopra, **chiavi server** per l’uso incluso.
 - **OXY Pass Elite**: massima potenza; Memory Vault max, storie, diario, community, cloud, voci premium, limite messaggi più alto (es. 400); come sopra, **chiavi server** per l’uso incluso.
-- **Piano BYOK**: abbonamento dedicato a chi porta le proprie chiavi (**OpenAI** e/o **Gemini**); senza chiavi salvate la chat non è disponibile.
-- **Lifetime (una tantum)**: pagamento una tantum, nessun rinnovo; per le versioni Lifetime è richiesta una **chiave API OpenAI personale**; i costi di utilizzo dell’API restano a carico dell’utente.
+- **Lifetime (una tantum)**: pagamento una tantum, nessun rinnovo; la **chat** usa le **chiavi server** come gli altri piani pagati (nessun obbligo di chiave personale per parlare con OXY sul backend).
 - I dettagli aggiornati su prezzi e limiti sono in app nella sezione Abbonamento e pagamenti.
 
 ---
@@ -149,8 +144,8 @@ I **Power Badges** sono **modalità prompt** che cambiano lo stile di risposta d
 - **“Come invio una foto?”**  
   In chat usa il pulsante/icona per allegare un’immagine; l’IA la analizzerà e risponderà (Vision).
 
-- **“Devo inserire le chiavi BYOK?”**  
-  Solo se hai il **piano BYOK** (allora sì, almeno OpenAI o Gemini). Con **OXY Pass** attivo, in genere no: il server usa le sue chiavi. Con **solo Lifetime** o senza abbonamento, di solito sì per OpenAI: in **Impostazioni → Chiavi BYOK** salva la chiave.
+- **“Devo inserire chiavi API per chattare?”**  
+  **No** per la chat principale: serve un **piano attivo** (OXY Pass), **Lifetime** o **credito token**. Il server usa le sue chiavi. Le chiavi personali in impostazioni, se presenti, possono servire solo a funzioni voce secondo l’app.
 
 - **“L’app non si connette / non vedo la cronologia.”**  
   Verifica connessione internet e che l’URL del backend sia raggiungibile (l’app usa un URL configurato in fase di build). Se sei loggato e vedi errori, riprova dopo qualche minuto; se persiste, contatta il supporto con il messaggio di errore.

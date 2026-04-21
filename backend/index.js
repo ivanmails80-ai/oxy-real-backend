@@ -100,13 +100,18 @@ const CHAT_MIN_INTERVAL_MS = 3000;
 const lastChatMessageAtByKey = new Map();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
-/** Modelli OpenAI: OXY Pass sul server, pacchetti token / BYOK OpenAI (mini). Solo due prodotti in vendita: Pass e BYOK. */
+/** Modelli OpenAI: OXY Pass / Lifetime / owner sul server usano OPENAI_MODEL_OXY_PASS; pacchetti token usano il modello “starter” (costo). */
 const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
 /** Chat OXY Pass (e owner): `OPENAI_MODEL_OXY_PASS`; se migrando da vecchio deploy esiste ancora `OPENAI_MODEL_ELITE` viene usato come fallback. Default gpt-4o. */
 const OPENAI_MODEL_OXY_PASS = (process.env.OPENAI_MODEL_OXY_PASS || process.env.OPENAI_MODEL_ELITE || 'gpt-4o').trim() || 'gpt-4o';
 const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || OPENAI_MODEL_STARTER).trim() || OPENAI_MODEL_STARTER;
 const MASTER_EMAIL = process.env.MASTER_EMAIL?.trim()?.toLowerCase();
 const PORT = process.env.PORT || 3030;
+/**
+ * Se `true`, consente ancora chat con sole chiavi OpenAI/Gemini in body (legacy app nativa / test).
+ * In produzione con Firebase lasciare **disattivato**: la chat passa solo da account + piano OXY / token / master.
+ */
+const CHAT_ALLOW_CLIENT_KEYS = String(process.env.CHAT_ALLOW_CLIENT_KEYS || '').trim() === 'true';
 
 /** Chiave Gemini valida (es. inizia con AIza, lunga): l'utente la porta, costo zero per noi. */
 function isValidGeminiKey(key) {
@@ -246,25 +251,14 @@ const _quickTest = process.env.BILLING_QUICK_TEST_LIMITS != null && process.env.
   ? Math.max(1, Math.min(100, Number(process.env.BILLING_QUICK_TEST_LIMITS)))
   : null;
 
-// Limite messaggi/giorno solo per OXY Pass (server). BYOK non ha limite lato piattaforma sulla chat. Env: DAILY_LIMIT_OXY_PASS (fallback legacy DAILY_LIMIT_ELITE).
+// Limite messaggi/giorno per abbonamenti OXY Pass sul server. Env: DAILY_LIMIT_OXY_PASS (fallback legacy DAILY_LIMIT_ELITE).
 const _dailyLimitOxyPass = _quickTest != null ? _quickTest : Math.max(1, Math.min(2000, Number(process.env.DAILY_LIMIT_OXY_PASS || process.env.DAILY_LIMIT_ELITE || 400)));
 const OWNER_UNLIMITED_PLAN_ID = 'owner_unlimited';
 
-/** Normalizza planId per lookup limiti giornalieri: tutto ciò che non è BYOK usa il tetto OXY Pass (anche righe legacy in Firestore). */
-function normalizePlanIdForLimits(planId) {
-  if (!planId || typeof planId !== 'string') return 'oxy_pass';
-  const p = planId.trim();
-  if (isByokPlanId(p)) return 'byok';
-  if (p === 'oxy_monthly' || p === 'oxy_semiannual' || p === 'oxy_annual') return 'oxy_pass';
-  if (p.startsWith('oxy_pass')) return 'oxy_pass';
-  return 'oxy_pass';
-}
-
-/** Modello chat lato server: Pass (e owner) usano OPENAI_MODEL_OXY_PASS; BYOK con chiave OpenAI utente usa il mini (costo sul suo account). */
+/** Modello chat: token pack → mini; abbonamento / lifetime / owner → modello Pass server. */
 function getChatModelForPlan(planId, useTokenPack) {
   if (useTokenPack) return OPENAI_MODEL_STARTER;
   if (!planId) return OPENAI_MODEL_STARTER;
-  if (isByokPlanId(planId)) return OPENAI_MODEL_STARTER;
   return OPENAI_MODEL_OXY_PASS;
 }
 
@@ -284,13 +278,6 @@ function computeSubscriptionActive(billing) {
   if (status === 'owner_unlimited') return true;
   if (status === 'active') return true;
   return false;
-}
-
-/** Piano BYOK: chat/voce usano solo chiavi client (OpenAI sk- / Gemini), mai OPENAI_API_KEY di bordo. */
-function isByokPlanId(planId) {
-  if (planId == null) return false;
-  const p = String(planId).trim().toLowerCase();
-  return p === 'byok' || p === 'sub_byok' || p.includes('byok');
 }
 
 async function ensureUsageDir() {
@@ -715,64 +702,71 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       dateISO: dateISOInput,
       initialMessage,
     } = req.body;
-    const useGemini = isValidGeminiKey(clientGeminiKey);
-    if (!idToken && !clientApiKey && !useGemini) {
-      return res.status(400).json({ error: 'idToken o chiavi BYOK (OpenAI / Gemini) richiesti' });
+
+    const hasClientOpenAI = typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-');
+    const useGeminiRaw = isValidGeminiKey(clientGeminiKey);
+    const allowLegacyClientKeys = !firebaseInitialized || CHAT_ALLOW_CLIENT_KEYS;
+    const useGemini = allowLegacyClientKeys && useGeminiRaw;
+
+    if (!allowLegacyClientKeys) {
+      if (!idToken) {
+        return res.status(401).json({ error: 'Effettua il login per usare la chat.' });
+      }
+    } else if (!idToken && !hasClientOpenAI && !useGeminiRaw) {
+      return res.status(400).json({
+        error: 'In sviluppo senza Firebase servono idToken oppure una chiave OpenAI (sk-…) o Gemini.',
+      });
     }
 
     let openaiKey = null;
     let uid = null;
     let billingSnapshot = null;
     let isMasterUser = false;
+
     if (idToken && firebaseInitialized) {
-      // Regola:
-      // - Master: usa OPENAI_API_KEY (se presente)
-      // - Abbonamento attivo, Lifetime pagato o owner: OPENAI_API_KEY (se presente e piano non BYOK-only)
-      // - Altrimenti: chiavi BYOK / Gemini, oppure credito pacchetto token sulla chiave server
-      try {
-        const authData = await requireAuth(idToken);
-        uid = authData?.uid || null;
-        const email = authData?.email || null;
-        if (uid && authMustVerifyEmail(authData) && !isMaster(email)) {
+      const authData = await requireAuth(idToken);
+      uid = authData?.uid || null;
+      const email = authData?.email || null;
+      if (!uid) {
+        if (!allowLegacyClientKeys) {
+          return res.status(401).json({ error: 'Token non valido o scaduto.' });
+        }
+      } else {
+        if (authMustVerifyEmail(authData) && !isMaster(email)) {
           return res.status(403).json({ error: 'Verifica la tua email prima di usare OXY in chat.' });
         }
         isMasterUser = !!(email && isMaster(email));
         if (isMasterUser && OPENAI_API_KEY) {
           openaiKey = OPENAI_API_KEY;
-        } else if (uid && OPENAI_API_KEY) {
+        } else if (OPENAI_API_KEY) {
           const billing = await readBilling(uid);
           billingSnapshot = billing;
           const status = billing?.status || 'none';
           const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
           const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
-          const planIdForKey = billing?.planId || '';
-          const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing) && !isByokPlanId(planIdForKey);
-          const lifetimeOk = mode === 'payment' && status === 'paid' && !isByokPlanId(planIdForKey);
+          const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing);
+          const lifetimeOk = mode === 'payment' && status === 'paid';
           const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk;
           if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
-      } catch (_) {
-        // token non valido → si passa all'eventuale apiKey client
       }
     }
-    // Credito pacchetto token: se ha balance > 0 usa la nostra chiave (fiducia cliente = consumo reale). BYOK escluso.
+
     let useTokenPack = false;
     if (!openaiKey && uid && OPENAI_API_KEY) {
-      const billingForPack = billingSnapshot || (await readBilling(uid));
-      const planIdPack = billingForPack?.planId || '';
-      if (!isByokPlanId(planIdPack)) {
-        const balance = await readTokenBalance(uid);
-        if (balance > 0) {
-          openaiKey = OPENAI_API_KEY;
-          useTokenPack = true;
-        }
+      const balance = await readTokenBalance(uid);
+      if (balance > 0) {
+        openaiKey = OPENAI_API_KEY;
+        useTokenPack = true;
       }
     }
-    if (!openaiKey && clientApiKey && typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-')) {
+    if (!openaiKey && allowLegacyClientKeys && hasClientOpenAI) {
       openaiKey = clientApiKey.trim();
     }
     if (!openaiKey && !useGemini) {
-      return res.status(400).json({ error: 'Chiavi BYOK (OpenAI o Gemini) non configurate. Inseriscile in Impostazioni → Chiavi BYOK o accedi come Master.' });
+      return res.status(403).json({
+        error: 'Nessun piano attivo o credito insufficiente. Apri Abbonamento per attivare OXY Pass o Lifetime.',
+      });
     }
 
     const requestKey = uid || req.ip || req.headers['x-forwarded-for'] || 'anonymous';
@@ -794,9 +788,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const used = await readChatUsage(uid, day);
       let limit = null;
       if (!paid.isOwnerUnlimited && paid.isSubscription) {
-        const planId = billing?.planId || 'oxy_pass';
-        const limitKey = normalizePlanIdForLimits(planId);
-        limit = limitKey === 'byok' ? null : _dailyLimitOxyPass;
+        limit = _dailyLimitOxyPass;
       }
       if (limit != null && used >= limit) {
         return res.status(429).json({ error: 'daily_high_priority_credits_used' });
@@ -1359,11 +1351,9 @@ app.get('/api/billing/status', billingPollLimiter, async (req, res) => {
     if (mode === 'owner' || status === 'owner_unlimited' || data.planId === OWNER_UNLIMITED_PLAN_ID) {
       usage = { used: usedToday, limit: null, tokensUsed, tokenBalance };
     } else if (mode === 'subscription' && status === 'active') {
-      const planId = data.planId || 'oxy_pass';
-      const limitKey = normalizePlanIdForLimits(planId);
       usage = {
         used: usedToday,
-        limit: limitKey === 'byok' ? null : _dailyLimitOxyPass,
+        limit: _dailyLimitOxyPass,
         tokensUsed,
         tokenBalance,
       };
@@ -1655,9 +1645,10 @@ app.post('/api/billing/webhook', async (req, res) => {
       if (uid && subscription.status === 'active') {
         const current = (await readBilling(uid)) || {};
         const priceId = subscription.items?.data?.[0]?.price?.id || null;
+        // Price ID legacy: mappati sui piani OXY Pass attuali (niente più prodotto BYOK separato).
         const PRICE_TO_PLAN = {
-          'price_1TN7PHGmOoq3tAJhVzPdMTOH': 'oxy_pass',
-          'price_1TN7RHGmOoq3tAJh2L9PO1sJ': 'byok',
+          'price_1TN7PHGmOoq3tAJhVzPdMTOH': 'oxy_monthly',
+          'price_1TN7RHGmOoq3tAJh2L9PO1sJ': 'oxy_monthly',
         };
         const planId = PRICE_TO_PLAN[priceId] || current.planId || subscription.metadata?.planId || null;
         await writeBilling(uid, {

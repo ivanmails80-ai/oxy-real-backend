@@ -5,7 +5,7 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 ## Ruoli
 
 - **Master**: email in `MASTER_EMAIL`. Il backend usa `OPENAI_API_KEY` e `TAVILY_API_KEY` proprie; l’app **non** deve contenere queste chiavi.
-- **Altri utenti**: l’app invia le proprie chiavi BYOK (OpenAI / Gemini) nel body; il backend le usa per chiamare OpenAI/Tavily.
+- **Altri utenti (produzione)**: l’app invia solo `idToken` Firebase; il backend usa `OPENAI_API_KEY` se l’utente ha **OXY Pass**, **Lifetime** o **credito token**, altrimenti risponde 403. (Opzionale per test legacy: `CHAT_ALLOW_CLIENT_KEYS=true` consente ancora `apiKey` / Gemini nel body.)
 
 ## Setup
 
@@ -27,14 +27,14 @@ Proxy per **nascondere le chiavi API** (OpenAI, Tavily) dall’app. L’app invi
 
 ## Endpoint
 
-- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `apiKey?`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo **Studio**: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `work_sector?` (solo **Lavoro**: `unknown` \| `administration` \| `marketing` \| `sales` \| `hr` \| `finance` \| `logistics` \| `it` \| `legal` \| `other`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **`moduleName: "Studio"`** il system message è **solo** il prompt tutor Studio + memoria essenziale. Con **`moduleName: "Lavoro"`** — stesso schema: prompt **Lavoro** dedicato (discovery una domanda alla volta, poi piano) + settore + memoria essenziale, **senza** prompt base OXY Real.
+- `POST /api/chat` — invio messaggio all'IA. Body: `idToken`, `history`, `message`, `imageBase64?`, `language`, `moduleName`, `customAiName`, `nowStr`, `dateISO`, `study_level?` (solo **Studio**: `unknown` \| `primary` \| `middle` \| `high` \| `university` \| `vocational` \| `adult`, default `unknown`), `work_sector?` (solo **Lavoro**: `unknown` \| `administration` \| `marketing` \| `sales` \| `hr` \| `finance` \| `logistics` \| `it` \| `legal` \| `other`, default `unknown`), `intent_anchor?` (opzionale, max 160 caratteri). Risposta: `{ answer }`. Con **`moduleName: "Studio"`** il system message è **solo** il prompt tutor Studio + memoria essenziale. Con **`moduleName: "Lavoro"`** — stesso schema: prompt **Lavoro** dedicato (discovery una domanda alla volta, poi piano) + settore + memoria essenziale, **senza** prompt base OXY Real.
 - `GET /api/chat/history` — cronologia chat. Header `Authorization: Bearer <idToken>` (o query `idToken`). Risposta: `{ messages }`.
 - `POST /api/chat/messages` — salvataggio messaggio. Header o body `idToken`, body `role`, `content`. Risposta: `{ ok: true }`.
 - `GET /health` — controllo stato.
 
 ## Conoscenza per l'assistente IA
 
-Il file **`knowledge/oxy_app_knowledge.md`** contiene la descrizione di funzionalità, prompt, server, chiavi BYOK, Memory Vault, Power Badges e istruzioni d'uso. Viene caricato all'avvio del server e iniettato nel system prompt dell'IA: così OXY può rispondere in modo esaustivo quando l'utente chiede "cosa puoi fare", "come funziona", "come accedo al server", ecc. Il file **non** è incluso nell'app; resta solo sul server. Per aggiornare le risposte dell'assistente, modifica il file e riavvia il backend (o implementa un reload su richiesta).
+Il file **`knowledge/oxy_app_knowledge.md`** contiene la descrizione di funzionalità, prompt, server, piani OXY, Memory Vault, Power Badges e istruzioni d'uso. Viene caricato all'avvio del server e iniettato nel system prompt dell'IA: così OXY può rispondere in modo esaustivo quando l'utente chiede "cosa puoi fare", "come funziona", "come accedo al server", ecc. Il file **non** è incluso nell'app; resta solo sul server. Per aggiornare le risposte dell'assistente, modifica il file e riavvia il backend (o implementa un reload su richiesta).
 
 ## Dati
 

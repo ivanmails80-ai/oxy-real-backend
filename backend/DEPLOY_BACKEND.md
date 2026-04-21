@@ -118,3 +118,8 @@ Se il backend è già su **Render** (es. https://oxy-real-backend.onrender.com),
 - Il backend legge **FIREBASE_SERVICE_ACCOUNT_JSON** (JSON del service account in base64). Se è già nelle variabili d’ambiente su Render, Firebase Admin è attivo e la verifica token funziona.
 - Se in produzione i login “non vanno” o ricevi errori di autorizzazione, controlla che su Render la variabile **FIREBASE_SERVICE_ACCOUNT_JSON** sia impostata (stesso valore base64 usato in sviluppo).  
 - **Niente** file su disco in produzione: solo questa variabile.
+
+### Chat senza BYOK (default produzione)
+
+- Con Firebase attivo, **`POST /api/chat`** accetta solo utenti loggati con **piano OXY / Lifetime / token** (o Master). Non impostare nulla per avere questo comportamento.
+- Solo per test o app legacy: variabile **`CHAT_ALLOW_CLIENT_KEYS=true`** riabilita l’invio di `apiKey` OpenAI / Gemini nel body (sconsigliato in produzione).
