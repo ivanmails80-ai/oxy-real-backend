@@ -243,6 +243,38 @@ function resolvePlanIdFromPriceId(priceId) {
   }
   return LEGACY_PRICE_TO_PLAN[priceId] || null;
 }
+function getPlanTier(planId) {
+  if (planId === 'oxy_annual') return 3;
+  if (planId === 'oxy_semiannual') return 2;
+  if (planId === 'oxy_monthly') return 1;
+  return 0;
+}
+function getSubscriptionStatusWeight(status) {
+  if (status === 'active') return 4;
+  if (status === 'trialing') return 3;
+  if (status === 'past_due') return 2;
+  if (status === 'unpaid') return 1;
+  return 0;
+}
+function pickBestSubscription(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      const planA = resolvePlanIdFromPriceId(a?.items?.data?.[0]?.price?.id || null);
+      const planB = resolvePlanIdFromPriceId(b?.items?.data?.[0]?.price?.id || null);
+      const tierDiff = getPlanTier(planB) - getPlanTier(planA);
+      if (tierDiff !== 0) return tierDiff;
+
+      const statusDiff = getSubscriptionStatusWeight(String(b?.status || '')) - getSubscriptionStatusWeight(String(a?.status || ''));
+      if (statusDiff !== 0) return statusDiff;
+
+      const periodEndDiff = Number(b?.current_period_end || 0) - Number(a?.current_period_end || 0);
+      if (periodEndDiff !== 0) return periodEndDiff;
+
+      return Number(b?.created || 0) - Number(a?.created || 0);
+    })[0] || null;
+}
 function getWelcomeEmailBody(planId, mode) {
   const planName = PLAN_DISPLAY_NAMES[planId] || planId;
   const planType = mode === 'subscription' ? 'subscription' : 'one-time purchase';
@@ -1200,41 +1232,38 @@ async function ensureLegacySubscriptionNaturalExpiry(stripe, subscription) {
 
 async function resolveStripeSubscriptionForUser(stripe, billing = null, email = null) {
   if (!stripe) return null;
-  let subscription = null;
+  const candidates = new Map();
   const billingSubId = typeof billing?.stripeSubscriptionId === 'string' ? billing.stripeSubscriptionId : '';
   const billingCustomerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
+  const addCandidate = (sub) => {
+    if (!sub?.id) return;
+    candidates.set(String(sub.id), sub);
+  };
 
   if (billingSubId) {
     try {
-      subscription = await stripe.subscriptions.retrieve(billingSubId);
-    } catch (_) {
-      subscription = null;
-    }
+      addCandidate(await stripe.subscriptions.retrieve(billingSubId));
+    } catch (_) {}
   }
 
-  if (!subscription && billingCustomerId) {
+  if (billingCustomerId) {
     try {
       const list = await stripe.subscriptions.list({ customer: billingCustomerId, status: 'all', limit: 10 });
-      subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
-    } catch (_) {
-      subscription = null;
-    }
+      for (const sub of list.data || []) addCandidate(sub);
+    } catch (_) {}
   }
 
-  if (!subscription && email) {
+  if (email) {
     try {
       const customers = await stripe.customers.list({ email, limit: 5 });
-      const customer = customers.data[0];
-      if (customer) {
+      for (const customer of customers.data || []) {
         const list = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
-        subscription = list.data.find((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)) || list.data[0] || null;
+        for (const sub of list.data || []) addCandidate(sub);
       }
-    } catch (_) {
-      subscription = null;
-    }
+    } catch (_) {}
   }
 
-  return subscription;
+  return pickBestSubscription(Array.from(candidates.values()));
 }
 
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
