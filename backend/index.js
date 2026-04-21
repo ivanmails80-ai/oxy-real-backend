@@ -1158,6 +1158,32 @@ function buildStripeCheckoutSuccessUrl() {
   return `${base}${join}paid=1&session_id={CHECKOUT_SESSION_ID}`;
 }
 
+function computePlanNaturalExpiry(planId, now = new Date()) {
+  const end = new Date(now);
+  if (planId === 'oxy_monthly') end.setMonth(end.getMonth() + 1);
+  else if (planId === 'oxy_semiannual') end.setMonth(end.getMonth() + 6);
+  else if (planId === 'oxy_annual') end.setFullYear(end.getFullYear() + 1);
+  else return null;
+  return Math.floor(end.getTime() / 1000);
+}
+
+async function ensureLegacySubscriptionNaturalExpiry(stripe, subscription) {
+  if (!stripe || !subscription?.id) return subscription;
+  const legacyAutoRenew =
+    !subscription.cancel_at &&
+    subscription.cancel_at_period_end !== true &&
+    ['active', 'trialing', 'past_due', 'unpaid'].includes(subscription.status);
+  if (!legacyAutoRenew) return subscription;
+  try {
+    return await stripe.subscriptions.update(subscription.id, {
+      cancel_at_period_end: true,
+    });
+  } catch (e) {
+    console.error('[Backend] legacy subscription normalization error:', e?.message || e);
+    return subscription;
+  }
+}
+
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   try {
@@ -1201,6 +1227,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const successUrl = buildStripeCheckoutSuccessUrl();
     const cancelUrl = STRIPE_CANCEL_URL || 'https://www.oxyreal.it/settings/billing';
 
+    const naturalExpiryUnix = computePlanNaturalExpiry(planIdVal.value);
     const session = await stripe.checkout.sessions.create({
       mode,
       success_url: successUrl,
@@ -1216,6 +1243,13 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
         uid,
         planId: planIdVal.value,
       },
+      ...(isSubscription && naturalExpiryUnix
+        ? {
+            subscription_data: {
+              cancel_at: naturalExpiryUnix,
+            },
+          }
+        : {}),
     });
 
     return res.json({ url: session.url });
@@ -1458,6 +1492,7 @@ app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
       }
     }
 
+    subscription = await ensureLegacySubscriptionNaturalExpiry(stripe, subscription);
     const item = subscription?.items?.data?.[0];
     const amountCents = item?.price?.unit_amount;
     const currency = item?.price?.currency;
@@ -1485,28 +1520,7 @@ app.post('/api/subscription/portal', billingLimiter, async (req, res) => {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
     const { uid, email } = await requireAuth(idToken);
     if (!uid || !email) return res.status(401).json({ error: 'Token mancante o non valido' });
-
-    const stripe = await getStripeClient();
-    if (!stripe) return res.status(503).json({ error: 'Stripe non configurato lato server.' });
-
-    const billing = await readBilling(uid);
-    let customerId = typeof billing?.stripeCustomerId === 'string' ? billing.stripeCustomerId : '';
-
-    if (!customerId && email) {
-      const customers = await stripe.customers.list({ email, limit: 5 });
-      customerId = customers.data?.[0]?.id || '';
-    }
-
-    if (!customerId) {
-      return res.status(404).json({ error: 'Nessun customer Stripe trovato per questo account.' });
-    }
-
-    const returnUrl = (STRIPE_CANCEL_URL || 'https://oxyreal.it/settings').trim();
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: returnUrl,
-    });
-    return res.json({ url: session.url });
+    return res.status(403).json({ error: 'Portale abbonamento disabilitato: l\'abbonamento resta attivo fino a scadenza naturale.' });
   } catch (e) {
     console.error('[Backend] POST /api/subscription/portal error:', e);
     return res.status(500).json({ error: 'Errore durante apertura portale abbonamento.' });
