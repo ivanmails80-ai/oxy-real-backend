@@ -1151,6 +1151,18 @@ async function persistCheckoutSessionBilling(session) {
   }
   const mode = session.mode || (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planId) ? 'subscription' : 'payment');
   const status = mode === 'subscription' ? 'active' : 'paid';
+  if (mode === 'subscription' && session.subscription) {
+    const stripe = await getStripeClient();
+    if (stripe) {
+      try {
+        await stripe.subscriptions.update(String(session.subscription), {
+          cancel_at_period_end: true,
+        });
+      } catch (e) {
+        console.error('[Backend] checkout subscription normalize error:', e?.message || e);
+      }
+    }
+  }
   await writeBilling(uid, {
     uid,
     planId,
@@ -1283,13 +1295,6 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
         uid,
         planId: planIdVal.value,
       },
-      ...(isSubscription
-        ? {
-            subscription_data: {
-              cancel_at_period_end: true,
-            },
-          }
-        : {}),
     });
 
     return res.json({ url: session.url });
