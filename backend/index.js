@@ -646,10 +646,12 @@ function parseMemoryExtraction(rawText) {
   }
 }
 
-/** Correzioni esplicite utente (es. "non ho 48 ma 46", "in realtà", "ho sbagliato"). */
+/** Correzioni esplicite utente (es. "Correggimi:", "non ho 48 ma 46", "in realtà", "ho sbagliato"). */
 function hasExplicitCorrectionIntent(text) {
-  const s = String(text || '').toLowerCase().trim();
+  const raw = String(text || '');
+  const s = raw.toLowerCase().trim();
   if (!s) return false;
+  if (/^\s*correggimi\s*:/i.test(raw)) return true;
   const patterns = [
     /\bho sbagliat[oa]\b/i,
     /\bin realt[aà]\b/i,
@@ -686,6 +688,7 @@ async function updateMemoryProfileFromCorrection({ uid, model, openaiKey, curren
 
   const prompt = `Aggiorna SOLO il campo profile della memoria utente.
 Rileva se il messaggio contiene una correzione esplicita di dati personali (età, nome, convivenza, stato di vita, ecc.).
+Se il messaggio inizia con "Correggimi:" è sempre una correzione diretta al profilo: applica subito quanto indicato dopo i due punti (anche se il resto è breve).
 Se NON c'è una correzione esplicita, rispondi con {"hasCorrection":false,"profile":""}.
 Se c'è, integra/correggi il profilo mantenendo le altre informazioni utili.
 Scrivi il profile in seconda persona, sintetico e coerente.
@@ -906,6 +909,10 @@ REGOLE SEMPRE VALIDE:
 MEMORIA:
 Usa quello che sai sull'utente in modo naturale — non citarlo meccanicamente ("come mi hai detto la settimana scorsa...") ma usalo per fare domande più precise e mostrarti presente.
 
+CORREZIONI ALLA MEMORIA:
+- Se l'utente corregge un dato che avevi capito male, rispondi con una sola frase breve di conferma (es. "Fatto.", "Corretto.", "Fatto. Ricordo che hai 46 anni.") senza spiegare limiti tecnici e senza dire che non puoi modificare la memoria o le informazioni salvate.
+- Se il messaggio inizia con "Correggimi:" il backend aggiorna subito il profilo nel Memory Vault: rispondi solo con una conferma breve (es. "Fatto. Ho aggiornato la tua memoria." o "Fatto.") senza disclaimers.
+
 ${memoryBlock}
 
 Istruzione finale non negoziabile: rispondi in ${targetLanguage}.`;
@@ -1038,6 +1045,42 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const billingForModel = billingSnapshot || (await readBilling(uid));
       chatModel = getChatModelForPlan(billingForModel?.planId, useTokenPack);
     }
+
+    const correggimiDirect =
+      uid &&
+      userMessageText &&
+      /^\s*correggimi\s*:/i.test(userMessageText) &&
+      openaiKey &&
+      !isInitialMessage &&
+      !(typeof imageBase64 === 'string' && imageBase64.trim());
+
+    if (correggimiDirect) {
+      await updateMemoryProfileFromCorrection({
+        uid,
+        model: chatModel,
+        openaiKey,
+        currentProfile: memorySnapshot?.profile || '',
+        userText: userMessageText,
+      });
+      const correctionTokensEstimate = 200;
+      if (uid) {
+        const billing = billingSnapshot || (await readBilling(uid));
+        const status = billing?.status || 'none';
+        const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+        const isSub = mode === 'subscription' && status === 'active';
+        const isOwnerUnlimited = mode === 'owner' || status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID;
+        const isLifetime = mode === 'payment' && status === 'paid';
+        if (isSub || isLifetime || isOwnerUnlimited) await incUsage(uid, dateISO(), 1, correctionTokensEstimate);
+        if (useTokenPack) await incUsage(uid, dateISO(), 1, correctionTokensEstimate);
+        if (useTokenPack && correctionTokensEstimate > 0) {
+          const balance = await readTokenBalance(uid);
+          const toDeduct = Math.min(correctionTokensEstimate, balance);
+          if (toDeduct > 0) await deductTokenBalance(uid, toDeduct);
+        }
+      }
+      return res.json({ answer: 'Fatto. Ho aggiornato la tua memoria.', initialMessage: false });
+    }
+
     const messages = [];
     const systemContent = buildOxySystemPrompt({ memoryBlock, language });
     console.log('[Backend] /api/chat prompt source: buildOxySystemPrompt (request masterPrompt ignored)');
