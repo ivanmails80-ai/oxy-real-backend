@@ -497,6 +497,8 @@ function emptyMemoryVault() {
     lastUpdated: null,
     sessionCount: 0,
     onboardingComplete: false,
+    onboardingProgress: 0,
+    onboardingRawAnswers: [],
   };
 }
 
@@ -528,6 +530,13 @@ async function readMemoryVault(uid) {
       lastUpdated: vault?.lastUpdated || null,
       sessionCount: Number.isFinite(Number(vault?.sessionCount)) ? Math.max(0, Number(vault.sessionCount)) : 0,
       onboardingComplete: vault?.onboardingComplete === true,
+      onboardingProgress: Number.isFinite(Number(vault?.onboardingProgress)) ? Math.max(0, Math.min(10, Number(vault.onboardingProgress))) : 0,
+      onboardingRawAnswers: Array.isArray(vault?.onboardingRawAnswers)
+        ? vault.onboardingRawAnswers.map((a) => ({
+            question: typeof a?.question === 'string' ? a.question.trim().slice(0, 300) : '',
+            answer: typeof a?.answer === 'string' ? a.answer.trim().slice(0, 500) : '',
+          })).filter((a) => a.question || a.answer).slice(0, 10)
+        : [],
     };
   } catch {
     return emptyMemoryVault();
@@ -546,6 +555,15 @@ async function writeMemoryVault(uid, updates = {}) {
     userNotes: sanitizeUserNotes(Array.isArray(updates.userNotes) ? updates.userNotes : current.userNotes),
     sessionCount: Number.isFinite(Number(updates.sessionCount)) ? Math.max(0, Number(updates.sessionCount)) : current.sessionCount,
     onboardingComplete: typeof updates.onboardingComplete === 'boolean' ? updates.onboardingComplete : current.onboardingComplete,
+    onboardingProgress: Number.isFinite(Number(updates.onboardingProgress))
+      ? Math.max(0, Math.min(10, Number(updates.onboardingProgress)))
+      : current.onboardingProgress,
+    onboardingRawAnswers: Array.isArray(updates.onboardingRawAnswers)
+      ? updates.onboardingRawAnswers.map((a) => ({
+          question: typeof a?.question === 'string' ? a.question.trim().slice(0, 300) : '',
+          answer: typeof a?.answer === 'string' ? a.answer.trim().slice(0, 500) : '',
+        })).filter((a) => a.question || a.answer).slice(0, 10)
+      : current.onboardingRawAnswers,
     lastUpdated: new Date().toISOString(),
   };
   await admin.firestore().collection('users').doc(uid).set({ memoryVault: next }, { merge: true });
@@ -1153,7 +1171,7 @@ app.post('/api/chat/messages', generalLimiter, async (req, res) => {
   }
 });
 
-async function runMemoryVaultExtraction({ openaiKey, model, currentProfile, currentPatterns, conversationText }) {
+async function runMemoryVaultExtraction({ openaiKey, model, currentProfile, currentPatterns, conversationText, language }) {
   if (!openaiKey) {
     return {
       profile: currentProfile || '',
@@ -1181,7 +1199,7 @@ Regole:
 - Non cancellare mai informazioni precedenti, solo integra
 - Se l'utente ha corretto un'informazione, aggiorna
 - Sii concreto e specifico, non generico
-- Scrivi in italiano`;
+- Scrivi nella stessa lingua usata nella conversazione (${String(language || 'auto')}).`;
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
     messages: [
@@ -1282,6 +1300,29 @@ app.post('/api/memory/note', generalLimiter, async (req, res) => {
   }
 });
 
+// POST /api/memory/onboarding-progress — salva avanzamento question time
+app.post('/api/memory/onboarding-progress', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    const progress = Math.max(0, Math.min(10, Number(req.body?.progress || 0)));
+    const raw = Array.isArray(req.body?.answers) ? req.body.answers : [];
+    const onboardingRawAnswers = raw
+      .map((a) => ({
+        question: typeof a?.question === 'string' ? a.question.trim().slice(0, 300) : '',
+        answer: typeof a?.answer === 'string' ? a.answer.trim().slice(0, 500) : '',
+      }))
+      .filter((a) => a.question || a.answer)
+      .slice(0, 10);
+    await writeMemoryVault(uid, { onboardingProgress: progress, onboardingRawAnswers });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[Backend] POST /api/memory/onboarding-progress error:', e);
+    res.status(500).json({ error: 'Errore durante il salvataggio avanzamento onboarding.' });
+  }
+});
+
 // POST /api/memory/consolidate — consolida sessione o completa onboarding
 app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
   try {
@@ -1294,6 +1335,19 @@ app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
     const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
     const openaiKey = OPENAI_API_KEY || null;
 
+    if (mode === 'onboarding_skip') {
+      await writeMemoryVault(uid, {
+        profile: '',
+        patterns: '',
+        recent: '',
+        onboardingComplete: true,
+        onboardingProgress: 10,
+        onboardingRawAnswers: [],
+      });
+      await clearChat(uid);
+      return res.json({ success: true });
+    }
+
     if (mode === 'onboarding') {
       const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
       if (!answers.length) return res.status(400).json({ error: 'answers mancanti' });
@@ -1303,6 +1357,8 @@ app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
         patterns: extracted.patterns || vault.patterns || '',
         recent: extracted.recent || 'Onboarding completato.',
         onboardingComplete: true,
+        onboardingProgress: 10,
+        onboardingRawAnswers: answers.slice(0, 10),
       });
       return res.json({ success: true });
     }
@@ -1323,6 +1379,7 @@ app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
       currentProfile: vault.profile || '',
       currentPatterns: vault.patterns || '',
       conversationText,
+      language: req.body?.language || 'auto',
     });
 
     await writeMemoryVault(uid, {
