@@ -680,6 +680,234 @@ async function createDiaryEntry(uid, payload) {
   return id;
 }
 
+const OXY_SESSION_THEMES = new Set(['Me stesso', 'Relazioni', 'Un blocco', 'Il futuro', 'Momento libero']);
+
+async function readActiveSession(uid) {
+  if (!uid || !firebaseInitialized) return null;
+  try {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    const raw = doc.exists ? doc.data()?.activeSession : null;
+    return normalizeActiveSession(raw);
+  } catch (e) {
+    console.error('[Backend] readActiveSession error:', e?.message || e);
+    return null;
+  }
+}
+
+function normalizeActiveSession(raw) {
+  if (raw == null || typeof raw !== 'object') return null;
+  const questions = Array.isArray(raw.questions)
+    ? raw.questions
+      .filter((q) => typeof q === 'string')
+      .map((q) => q.trim().slice(0, 520))
+      .filter(Boolean)
+      .slice(0, 12)
+    : [];
+  const answers = Array.isArray(raw.answers)
+    ? raw.answers
+      .filter((a) => typeof a === 'string')
+      .map((a) => a.trim().slice(0, 8000))
+      .slice(0, 12)
+    : [];
+  let startedAt = '';
+  if (typeof raw.startedAt === 'string' && raw.startedAt.trim()) startedAt = raw.startedAt.trim();
+  else if (raw.startedAt && typeof raw.startedAt.toDate === 'function') startedAt = raw.startedAt.toDate().toISOString();
+  if (!startedAt) startedAt = new Date().toISOString();
+  const theme = typeof raw.theme === 'string' ? raw.theme.trim().slice(0, 80) : '';
+  const cq = Number.isFinite(Number(raw.currentQuestion)) ? Math.max(0, Math.min(20, Number(raw.currentQuestion))) : 0;
+  const insight = typeof raw.insight === 'string' ? raw.insight.trim().slice(0, 12000) : '';
+  const keyPhrase = typeof raw.keyPhrase === 'string' ? raw.keyPhrase.trim().slice(0, 500) : '';
+  const awaitingDiary = raw.awaitingDiary === true;
+  if (!questions.length && !theme && !answers.length && !insight) return null;
+  const out = { theme, questions, answers, currentQuestion: cq, startedAt };
+  if (insight) out.insight = insight;
+  if (keyPhrase) out.keyPhrase = keyPhrase;
+  if (awaitingDiary) out.awaitingDiary = true;
+  return out;
+}
+
+function validateActiveSessionWrite(body) {
+  if (body?.clear === true) return { valid: true, clear: true };
+  const theme = typeof body?.theme === 'string' ? body.theme.trim() : '';
+  const questions = Array.isArray(body?.questions)
+    ? body.questions.filter((q) => typeof q === 'string').map((q) => q.trim().slice(0, 520)).filter(Boolean).slice(0, 12)
+    : [];
+  const answers = Array.isArray(body?.answers)
+    ? body.answers.filter((a) => typeof a === 'string').map((a) => a.trim().slice(0, 8000)).slice(0, 12)
+    : [];
+  const startedAt = typeof body?.startedAt === 'string' && body.startedAt.trim() ? body.startedAt.trim().slice(0, 40) : new Date().toISOString();
+  const currentQuestion = Number.isFinite(Number(body?.currentQuestion)) ? Math.max(0, Math.min(20, Number(body.currentQuestion))) : 0;
+  if (!OXY_SESSION_THEMES.has(theme)) return { valid: false, error: 'Tema sessione non valido.' };
+  if (answers.length > questions.length) return { valid: false, error: 'Risposte in eccesso rispetto alle domande.' };
+  if (currentQuestion > questions.length) return { valid: false, error: 'currentQuestion non valido.' };
+  const insight = typeof body?.insight === 'string' ? body.insight.trim().slice(0, 12000) : '';
+  const keyPhrase = typeof body?.keyPhrase === 'string' ? body.keyPhrase.trim().slice(0, 500) : '';
+  const awaitingDiary = body?.awaitingDiary === true;
+  const hasQ = questions.length > 0;
+  const hasInsight = insight.length > 0;
+  if (!hasQ && !hasInsight) return { valid: false, error: 'Dati sessione insufficienti.' };
+  const out = { theme, questions, answers, currentQuestion, startedAt };
+  if (insight) out.insight = insight;
+  if (keyPhrase) out.keyPhrase = keyPhrase;
+  if (awaitingDiary) out.awaitingDiary = true;
+  return { valid: true, value: out };
+}
+
+async function writeActiveSession(uid, sessionObj) {
+  if (!uid || !firebaseInitialized) return;
+  await admin.firestore().collection('users').doc(uid).set({ activeSession: sessionObj }, { merge: true });
+}
+
+async function clearActiveSession(uid) {
+  if (!uid || !firebaseInitialized) return;
+  await admin.firestore().collection('users').doc(uid).set({ activeSession: null }, { merge: true });
+}
+
+async function uidHasServerOpenAiAccess(uid) {
+  if (!uid || !OPENAI_API_KEY) return false;
+  const vault = await readMemoryVault(uid);
+  if (userHasActiveMemoryOnboardingQuestionnaire(vault)) return true;
+  const billing = await readBilling(uid);
+  if (computePaidChatAccess(billing).hasPlan) return true;
+  return (await readTokenBalance(uid)) > 0;
+}
+
+function formatSessionHistoryForPrompt(sessionHistory) {
+  if (!Array.isArray(sessionHistory) || !sessionHistory.length) return '(nessuno scambio precedente in questa sessione strutturata)';
+  const lines = sessionHistory
+    .slice(-24)
+    .map((m) => {
+      const role = m?.role === 'assistant' ? 'OXY' : 'UTENTE';
+      const c = typeof m?.content === 'string' ? m.content.trim().slice(0, 1200) : '';
+      return c ? `${role}: ${c}` : '';
+    })
+    .filter(Boolean);
+  return lines.length ? lines.join('\n') : '(nessuno scambio precedente in questa sessione strutturata)';
+}
+
+function parseSessionQuestionsJson(rawText) {
+  const out = [];
+  if (!rawText || typeof rawText !== 'string') return out;
+  try {
+    const obj = JSON.parse(rawText);
+    const arr = Array.isArray(obj?.questions) ? obj.questions : Array.isArray(obj) ? obj : [];
+    for (const q of arr) {
+      if (typeof q === 'string' && q.trim()) out.push(q.trim().slice(0, 520));
+      if (out.length >= 10) break;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return out;
+}
+
+function parseSessionInsightJson(rawText) {
+  const fallback = { insight: '', keyPhrase: '' };
+  if (!rawText || typeof rawText !== 'string') return fallback;
+  try {
+    const obj = JSON.parse(rawText);
+    return {
+      insight: typeof obj?.insight === 'string' ? obj.insight.trim() : '',
+      keyPhrase: typeof obj?.keyPhrase === 'string' ? obj.keyPhrase.trim() : '',
+    };
+  } catch (_) {
+    return fallback;
+  }
+}
+
+async function runOxySessionQuestionsOpenAI({ openaiKey, model, theme, profile, sessionHistory }) {
+  const profileBlock = String(profile || '').trim().slice(0, 4000) || '(profilo non ancora ricco — resta concreto lo stesso.)';
+  const hist = formatSessionHistoryForPrompt(sessionHistory);
+  const userPrompt = `Tema scelto dall'utente: "${theme}".
+
+PROFILO MEMORIA (contesto, non citare alla lettera):
+${profileBlock}
+
+Scambi già avvenuti in questa sessione strutturata (se utile per coerenza):
+${hist}
+
+Genera tra 8 e 10 domande in italiano, UNA per riga concettuale nell'array JSON.
+Le prime 8 sono obbligatorie; se serve approfondire davvero, aggiungi fino a 2 domande extra (massimo 10 in totale).
+Ogni domanda deve essere specifica per questa persona e questo tema — niente domande da manuale generico.
+Niente prefissi numerati nel testo della domanda. Tono caldo, diretto, come OXY in chat.
+
+Rispondi solo JSON: {"questions":["...","..."]}`;
+
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: 'Sei OXY. Rispondi solo con JSON valido: oggetto con chiave "questions" (array di stringhe, 8-10 elementi).',
+      },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.55,
+    max_tokens: 600,
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Generazione domande sessione non disponibile');
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseSessionQuestionsJson(typeof content === 'string' ? content : '');
+}
+
+async function runOxySessionInsightOpenAI({ openaiKey, model, theme, profile, questions, answers }) {
+  const qaLines = [];
+  const n = Math.min(questions.length, answers.length);
+  for (let i = 0; i < n; i++) {
+    qaLines.push(`D: ${questions[i]}\nR: ${answers[i]}`);
+  }
+  const qaBlock = qaLines.join('\n\n');
+  const profileBlock = String(profile || '').trim().slice(0, 4000) || '(profilo limitato)';
+
+  const userPrompt = `Tema sessione: "${theme}".
+
+PROFILO (contesto):
+${profileBlock}
+
+DOMANDE E RISPOSTE (sessione strutturata):
+${qaBlock}
+
+Compito: scrivi un insight finale in PRIMA PERSONA, come se fosse la voce interior dell'utente che si rivolge a se stessa — non narratore esterno.
+Stile: prosa letteraria accessibile, emotivamente onesta, voce precisa (ispirazione: autobiografico intimo, tipo "Tre Porte").
+Non trascrivere le risposte: trasformale in immagini e movimento interiore. Amplifica le emozioni, non riassumerle.
+Lunghezza: circa 5-8 frasi brevi o paragrafi compatti (equivalente 5-8 righe).
+Chiudi con una frase finale che colpisce.
+
+Estrai anche "keyPhrase": una sola frase breve, la più forte, stile letterario (può coincidere con l'ultima frase se è la più potente).
+
+Rispondi solo JSON: {"insight":"...","keyPhrase":"..."}`;
+
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: 'Sei OXY. Rispondi solo con JSON valido con chiavi insight (stringa) e keyPhrase (stringa).',
+      },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.65,
+    max_tokens: 600,
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Generazione insight sessione non disponibile');
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseSessionInsightJson(typeof content === 'string' ? content : '');
+}
+
 async function readRelationalMemory(uid) {
   const vault = await readMemoryVault(uid);
   return { profile: vault.profile, patterns: vault.patterns, recent: vault.recent };
@@ -1578,6 +1806,111 @@ app.post('/api/diary/entry', generalLimiter, async (req, res) => {
   } catch (e) {
     console.error('[Backend] POST /api/diary/entry error:', e);
     res.status(500).json({ error: 'Errore durante il salvataggio nel diario.' });
+  }
+});
+
+// GET /api/session/active — sessione OXY strutturata in corso (Firestore users.activeSession)
+app.get('/api/session/active', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!firebaseInitialized) return res.json({ activeSession: null });
+    const activeSession = await readActiveSession(uid);
+    res.json({ activeSession });
+  } catch (e) {
+    console.error('[Backend] GET /api/session/active error:', e);
+    res.status(500).json({ error: 'Errore durante il caricamento della sessione.' });
+  }
+});
+
+// POST /api/session/active — salva / cancella activeSession
+app.post('/api/session/active', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!firebaseInitialized) return res.status(503).json({ error: 'Sessione non disponibile.' });
+    const parsed = validateActiveSessionWrite(req.body || {});
+    if (!parsed.valid) return res.status(400).json({ error: parsed.error });
+    if (parsed.clear) {
+      await clearActiveSession(uid);
+      return res.json({ success: true });
+    }
+    await writeActiveSession(uid, parsed.value);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[Backend] POST /api/session/active error:', e);
+    res.status(500).json({ error: 'Errore durante il salvataggio della sessione.' });
+  }
+});
+
+// POST /api/session/questions — genera 8–10 domande personalizzate (Sessione OXY)
+app.post('/api/session/questions', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!(await uidHasServerOpenAiAccess(uid))) {
+      return res.status(403).json({ error: 'Piano o crediti non sufficienti per avviare la sessione.' });
+    }
+    if (!OPENAI_API_KEY) return res.status(503).json({ error: 'Servizio sessione non configurato.' });
+    const theme = typeof req.body?.theme === 'string' ? req.body.theme.trim() : '';
+    if (!OXY_SESSION_THEMES.has(theme)) return res.status(400).json({ error: 'Tema non valido.' });
+    const profile = typeof req.body?.profile === 'string' ? req.body.profile.trim().slice(0, 4000) : '';
+    const sessionHistory = Array.isArray(req.body?.sessionHistory) ? req.body.sessionHistory : [];
+    const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
+    const questions = await runOxySessionQuestionsOpenAI({
+      openaiKey: OPENAI_API_KEY,
+      model,
+      theme,
+      profile,
+      sessionHistory,
+    });
+    if (questions.length < 8) {
+      return res.status(500).json({ error: 'Domande sessione insufficienti. Riprova.' });
+    }
+    res.json({ questions });
+  } catch (e) {
+    console.error('[Backend] POST /api/session/questions error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Errore generazione domande sessione.' });
+  }
+});
+
+// POST /api/session/insight — insight romanzato finale (Sessione OXY)
+app.post('/api/session/insight', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!(await uidHasServerOpenAiAccess(uid))) {
+      return res.status(403).json({ error: 'Piano o crediti non sufficienti per completare la sessione.' });
+    }
+    if (!OPENAI_API_KEY) return res.status(503).json({ error: 'Servizio sessione non configurato.' });
+    const theme = typeof req.body?.theme === 'string' ? req.body.theme.trim() : '';
+    if (!OXY_SESSION_THEMES.has(theme)) return res.status(400).json({ error: 'Tema non valido.' });
+    const profile = typeof req.body?.profile === 'string' ? req.body.profile.trim().slice(0, 4000) : '';
+    const questions = Array.isArray(req.body?.questions) ? req.body.questions : [];
+    const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+    const qs = questions.filter((q) => typeof q === 'string').map((q) => q.trim()).slice(0, 12);
+    const as = answers.filter((a) => typeof a === 'string').map((a) => a.trim()).slice(0, 12);
+    if (qs.length < 8 || as.length !== qs.length) {
+      return res.status(400).json({ error: 'Domande e risposte non allineate o incomplete.' });
+    }
+    const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
+    const { insight, keyPhrase } = await runOxySessionInsightOpenAI({
+      openaiKey: OPENAI_API_KEY,
+      model,
+      theme,
+      profile,
+      questions: qs,
+      answers: as,
+    });
+    if (!insight || !keyPhrase) return res.status(500).json({ error: 'Insight non generato. Riprova.' });
+    res.json({ insight, keyPhrase });
+  } catch (e) {
+    console.error('[Backend] POST /api/session/insight error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Errore generazione insight sessione.' });
   }
 });
 
