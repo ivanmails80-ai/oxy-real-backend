@@ -588,6 +588,98 @@ async function addMemoryVaultUserNote(uid, text) {
   return noteId;
 }
 
+const DIARY_THEMES = new Set([
+  'Me stesso',
+  'Relazioni',
+  'Un blocco',
+  'Il futuro',
+  'Momento libero',
+  'Chat',
+  'Libro',
+]);
+
+const DIARY_SOURCES = new Set(['session', 'chat', 'book']);
+
+function formatDiaryDoc(doc) {
+  const d = doc.data() || {};
+  let dateIso = null;
+  const rawDate = d.date;
+  if (rawDate && typeof rawDate.toDate === 'function') dateIso = rawDate.toDate().toISOString();
+  else if (typeof rawDate === 'string' && rawDate.trim()) dateIso = rawDate.trim();
+  return {
+    id: doc.id,
+    date: dateIso || new Date(0).toISOString(),
+    theme: typeof d.theme === 'string' ? d.theme : '',
+    insight: typeof d.insight === 'string' ? d.insight : '',
+    keyPhrase: typeof d.keyPhrase === 'string' ? d.keyPhrase : '',
+    source: typeof d.source === 'string' ? d.source : 'chat',
+    ...(typeof d.chapterRef === 'number' && Number.isFinite(d.chapterRef) ? { chapterRef: d.chapterRef } : {}),
+    ...(typeof d.sessionRef === 'number' && Number.isFinite(d.sessionRef) ? { sessionRef: d.sessionRef } : {}),
+  };
+}
+
+async function listDiaryEntries(uid) {
+  if (!uid || !firebaseInitialized) return [];
+  try {
+    const snap = await admin
+      .firestore()
+      .collection('users')
+      .doc(uid)
+      .collection('diary')
+      .orderBy('date', 'desc')
+      .limit(200)
+      .get();
+    return snap.docs.map((doc) => formatDiaryDoc(doc));
+  } catch (e) {
+    console.error('[Backend] listDiaryEntries error:', e?.message || e);
+    return [];
+  }
+}
+
+function validateDiaryEntryBody(body) {
+  const theme = typeof body?.theme === 'string' ? body.theme.trim() : '';
+  if (!DIARY_THEMES.has(theme)) return { valid: false, error: 'Tema non valido.' };
+  const insightVal = validateString(body?.insight, 'insight', 12000, 1);
+  if (!insightVal.valid) return insightVal;
+  const keyVal = validateString(body?.keyPhrase, 'keyPhrase', 500, 1);
+  if (!keyVal.valid) return keyVal;
+  const source = typeof body?.source === 'string' ? body.source.trim() : '';
+  if (!DIARY_SOURCES.has(source)) return { valid: false, error: 'Origine (source) non valida.' };
+  const out = {
+    theme,
+    insight: insightVal.value,
+    keyPhrase: keyVal.value,
+    source,
+  };
+  if (body?.chapterRef != null && body.chapterRef !== '') {
+    const n = Number(body.chapterRef);
+    if (!Number.isInteger(n) || n < 1 || n > 99) return { valid: false, error: 'chapterRef non valido.' };
+    out.chapterRef = n;
+  }
+  if (body?.sessionRef != null && body.sessionRef !== '') {
+    const n = Number(body.sessionRef);
+    if (!Number.isInteger(n) || n < 1 || n > 999) return { valid: false, error: 'sessionRef non valido.' };
+    out.sessionRef = n;
+  }
+  return { valid: true, value: out };
+}
+
+async function createDiaryEntry(uid, payload) {
+  const id = randomUUID();
+  const ref = admin.firestore().collection('users').doc(uid).collection('diary').doc(id);
+  const doc = {
+    theme: payload.theme,
+    insight: payload.insight,
+    keyPhrase: payload.keyPhrase,
+    source: payload.source,
+    date: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (payload.chapterRef != null) doc.chapterRef = payload.chapterRef;
+  if (payload.sessionRef != null) doc.sessionRef = payload.sessionRef;
+  await ref.set(doc);
+  return id;
+}
+
 async function readRelationalMemory(uid) {
   const vault = await readMemoryVault(uid);
   return { profile: vault.profile, patterns: vault.patterns, recent: vault.recent };
@@ -1454,6 +1546,38 @@ app.get('/api/memory/vault', generalLimiter, async (req, res) => {
   } catch (e) {
     console.error('[Backend] GET /api/memory/vault error:', e);
     res.status(500).json({ error: 'Errore durante il caricamento del Memory Vault.' });
+  }
+});
+
+// GET /api/diary — tutte le entry del diario, più recenti prima
+app.get('/api/diary', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!firebaseInitialized) return res.json({ entries: [] });
+    const entries = await listDiaryEntries(uid);
+    res.json({ entries });
+  } catch (e) {
+    console.error('[Backend] GET /api/diary error:', e);
+    res.status(500).json({ error: 'Errore durante il caricamento del diario.' });
+  }
+});
+
+// POST /api/diary/entry — nuova entry (insight già romanzato dal flusso sessione/libro/chat)
+app.post('/api/diary/entry', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!firebaseInitialized) return res.status(503).json({ error: 'Diario non disponibile.' });
+    const parsed = validateDiaryEntryBody(req.body || {});
+    if (!parsed.valid) return res.status(400).json({ error: parsed.error });
+    const entryId = await createDiaryEntry(uid, parsed.value);
+    res.json({ success: true, id: entryId });
+  } catch (e) {
+    console.error('[Backend] POST /api/diary/entry error:', e);
+    res.status(500).json({ error: 'Errore durante il salvataggio nel diario.' });
   }
 });
 
