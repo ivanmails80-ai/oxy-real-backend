@@ -1190,16 +1190,17 @@ ${conversationText}
 
 Restituisci SOLO un JSON con questa struttura:
 {
-  "profile": "stringa aggiornata in seconda persona - mantieni tutto quello che c'era, aggiungi solo cose nuove o correggi errori espliciti",
+  "profile": "riassunto strutturato e permanente in seconda persona: dati anagrafici, situazione di vita, valori, obiettivi, relazioni. Si accumula nel tempo; integra solo informazioni nuove o correzioni esplicite dell'utente, senza cancellare il passato.",
   "patterns": "stringa aggiornata - schemi comportamentali, blocchi, progressi emersi in questa sessione",
-  "recent": "sintesi di questa sessione in 3-5 righe - cosa e stato detto, cosa e emerso, come stava l'utente"
+  "recent": "sintesi in seconda persona e tono narrativo di QUESTA sessione: come stavi, cosa hai detto di nuovo, quali emozioni sono emerse, cosa è cambiato rispetto a prima. 3-5 righe."
 }
 
 Regole:
-- Non cancellare mai informazioni precedenti, solo integra
-- Se l'utente ha corretto un'informazione, aggiorna
+- Non cancellare mai informazioni precedenti nel profile, solo integra o correggi se l'utente lo chiede chiaramente
+- Se l'utente ha corretto un'informazione, aggiorna il profile
 - Sii concreto e specifico, non generico
-- Scrivi sempre in seconda persona rivolgendoti direttamente all'utente (es: "Hai..., vivi..., vuoi...")
+- Scrivi profile e recent sempre in seconda persona rivolgendoti all'utente (es: Hai..., vivi..., sentivi...)
+- Non ripetere informazioni già presenti nel profile. Recent deve descrivere solo quello che è emerso in questa specifica sessione (fatti, tono, emozioni, svolte), senza riscrivere il profilo statico
 - Scrivi nella stessa lingua usata nella conversazione (${String(language || 'auto')}).`;
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
@@ -1247,19 +1248,21 @@ async function runOnboardingProfileExtraction({ openaiKey, model, answers, langu
       { role: 'system', content: 'Sei un estrattore di memoria. Rispondi solo con JSON valido.' },
       {
         role: 'user',
-        content: `Analizza le risposte di onboarding e produci un profilo iniziale della persona.
+        content: `Analizza le risposte di onboarding.
+
 Risposte:
 ${joined}
 
 Restituisci SOLO JSON:
 {
-  "profile": "riassunto strutturato in seconda persona (max 700 parole)",
+  "profile": "riassunto strutturato e permanente in seconda persona (max 700 parole): chi sei, situazione di vita, valori, obiettivi, relazioni. Testo che restera valido nel tempo e si accumulera nelle sessioni successive.",
   "patterns": "",
-  "recent": "sintesi reale dell'onboarding in 3-5 righe, concreta e specifica"
+  "recent": "sintesi narrativa in seconda persona (3-5 righe) di come è andato questo onboarding: cosa hai condiviso, tono e emozioni, cosa è emerso di nuovo rispetto a zero informazioni prima."
 }
 Regole:
-- Scrivi sempre in seconda persona rivolgendoti direttamente all'utente (es: Hai..., vivi..., vuoi...)
+- Scrivi profile e recent sempre in seconda persona (es: Hai..., vivi..., sentivi...)
 - Non inventare informazioni
+- Non ripetere nel recent ciò che già riassumi nel profile. Recent = solo ciò che è emerso in questo percorso di domande/risposte (processo, reazioni, clima emotivo), non un secondo profilo anagrafico
 - Scrivi nella lingua usata dall'utente (${String(language || 'auto')})
 - patterns deve essere stringa vuota`,
       },
