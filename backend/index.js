@@ -646,6 +646,92 @@ function parseMemoryExtraction(rawText) {
   }
 }
 
+/** Correzioni esplicite utente (es. "non ho 48 ma 46", "in realtà", "ho sbagliato"). */
+function hasExplicitCorrectionIntent(text) {
+  const s = String(text || '').toLowerCase().trim();
+  if (!s) return false;
+  const patterns = [
+    /\bho sbagliat[oa]\b/i,
+    /\bin realt[aà]\b/i,
+    /\bcorrezione\b/i,
+    /\bvolevo dire\b/i,
+    /\bnon (?:ho|sono|vivo|mi chiamo)\b[\s\S]{0,80}\bma\b/i,
+    /\bnon [^.!?]{0,80}\bma\b/i,
+  ];
+  return patterns.some((re) => re.test(s));
+}
+
+function parseImmediateProfileCorrection(rawText) {
+  const fallback = { hasCorrection: false, profile: '' };
+  if (!rawText || typeof rawText !== 'string') return fallback;
+  try {
+    const obj = JSON.parse(rawText);
+    return {
+      hasCorrection: obj?.hasCorrection === true,
+      profile: typeof obj?.profile === 'string' ? obj.profile.trim() : '',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Update immediato del solo profile su correzioni esplicite.
+ * Chiamata leggera separata (max_tokens: 200), best-effort.
+ */
+async function updateMemoryProfileFromCorrection({ uid, model, openaiKey, currentProfile, userText }) {
+  if (!uid || !openaiKey) return;
+  const cleanUserText = String(userText || '').trim();
+  if (!cleanUserText || !hasExplicitCorrectionIntent(cleanUserText)) return;
+
+  const prompt = `Aggiorna SOLO il campo profile della memoria utente.
+Rileva se il messaggio contiene una correzione esplicita di dati personali (età, nome, convivenza, stato di vita, ecc.).
+Se NON c'è una correzione esplicita, rispondi con {"hasCorrection":false,"profile":""}.
+Se c'è, integra/correggi il profilo mantenendo le altre informazioni utili.
+Scrivi il profile in seconda persona, sintetico e coerente.
+
+PROFILO ATTUALE:
+${String(currentProfile || '').trim() || '(vuoto)'}
+
+MESSAGGIO UTENTE:
+${cleanUserText}
+
+Rispondi solo JSON valido:
+{"hasCorrection":true,"profile":"..."}
+oppure
+{"hasCorrection":false,"profile":""}`;
+
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Rispondi solo in JSON valido con chiavi: hasCorrection, profile.' },
+      { role: 'user', content: prompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.1,
+    max_tokens: 200,
+  };
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    const parsed = parseImmediateProfileCorrection(typeof content === 'string' ? content : '');
+    if (!parsed.hasCorrection || !parsed.profile) return;
+    await writeMemoryVault(uid, { profile: parsed.profile });
+  } catch (_) {
+    // Best effort: non bloccare la risposta chat
+  }
+}
+
 async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnapshot, messageText, answerText }) {
   if (!uid || !openaiKey) return;
   const userText = String(messageText || '').trim();
@@ -944,7 +1030,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     const memorySnapshot = { profile: memoryVault.profile, patterns: memoryVault.patterns, recent: memoryVault.recent };
     const memoryBlock = relationalMemoryBlock(memorySnapshot, memoryVault.userNotes, Number(memoryVault.sessionCount || 0));
 
-    const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
+    const userMessageText = typeof message === 'string' ? message.trim() : '';
+    const isInitialMessage = !!initialMessage && !userMessageText;
     // Modello per tier; usato in system prompt e in payload
     let chatModel = OPENAI_CHAT_MODEL;
     if (uid && openaiKey) {
@@ -1103,6 +1190,18 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         if (toDeduct > 0) await deductTokenBalance(uid, toDeduct);
       }
     }
+
+    // Correzione esplicita dati personali -> update immediato del profile (senza attendere consolidamento).
+    if (uid && userMessageText && hasExplicitCorrectionIntent(userMessageText)) {
+      await updateMemoryProfileFromCorrection({
+        uid,
+        model: chatModel,
+        openaiKey,
+        currentProfile: memorySnapshot?.profile || '',
+        userText: userMessageText,
+      });
+    }
+
     res.json({ answer: finalContent, initialMessage: isInitialMessage });
   } catch (e) {
     console.error('[Backend] /api/chat error:', e);
