@@ -477,43 +477,117 @@ async function appendMessage(uid, role, content) {
   await fs.writeFile(chatPath(uid), JSON.stringify({ messages }, null, 0), 'utf8');
 }
 
-// ——— Memoria relazionale a 3 livelli (nuovo OXY) ———
-
-async function readRelationalMemory(uid) {
-  if (!uid || !firebaseInitialized) return { profile: '', patterns: '', recent: '' };
+async function clearChat(uid) {
+  if (!uid) return;
   try {
-    const doc = await admin.firestore().collection('users').doc(uid).get();
-    const memory = (doc.exists && doc.data() && doc.data().memory) ? doc.data().memory : {};
-    return {
-      profile: typeof memory?.profile === 'string' ? memory.profile : '',
-      patterns: typeof memory?.patterns === 'string' ? memory.patterns : '',
-      recent: typeof memory?.recent === 'string' ? memory.recent : '',
-    };
-  } catch {
-    return { profile: '', patterns: '', recent: '' };
+    await fs.unlink(chatPath(uid));
+  } catch (_) {
+    // ignore if file does not exist
   }
 }
 
-async function writeRelationalMemory(uid, updates) {
-  if (!uid || !firebaseInitialized || !updates || typeof updates !== 'object') return;
-  const profile = typeof updates.profile === 'string' ? updates.profile.trim().slice(0, 4000) : '';
-  const patterns = typeof updates.patterns === 'string' ? updates.patterns.trim().slice(0, 4000) : '';
-  const recent = typeof updates.recent === 'string' ? updates.recent.trim().slice(0, 4000) : '';
-  await admin.firestore().collection('users').doc(uid).set({
-    memory: {
-      profile,
-      patterns,
-      recent,
-      updatedAt: new Date().toISOString(),
-    },
-  }, { merge: true });
+// ——— Memory Vault (persistente) ———
+
+function emptyMemoryVault() {
+  return {
+    profile: '',
+    patterns: '',
+    recent: '',
+    userNotes: [],
+    lastUpdated: null,
+    sessionCount: 0,
+    onboardingComplete: false,
+  };
 }
 
-function relationalMemoryBlock(memory) {
-  const profile = typeof memory?.profile === 'string' && memory.profile.trim() ? memory.profile.trim() : '(vuoto)';
-  const patterns = typeof memory?.patterns === 'string' && memory.patterns.trim() ? memory.patterns.trim() : '(vuoto)';
-  const recent = typeof memory?.recent === 'string' && memory.recent.trim() ? memory.recent.trim() : '(vuoto)';
-  return `memory.profile: ${profile}\nmemory.patterns: ${patterns}\nmemory.recent: ${recent}`;
+function sanitizeUserNotes(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((n) => ({
+      id: typeof n?.id === 'string' && n.id.trim() ? n.id.trim().slice(0, 64) : randomUUID(),
+      text: typeof n?.text === 'string' ? n.text.trim().slice(0, 200) : '',
+      createdAt: n?.createdAt || new Date().toISOString(),
+    }))
+    .filter((n) => n.text)
+    .slice(0, 20);
+}
+
+async function readMemoryVault(uid) {
+  if (!uid || !firebaseInitialized) return emptyMemoryVault();
+  try {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    const data = doc.exists ? (doc.data() || {}) : {};
+    const vault = data?.memoryVault || {};
+    // Fallback legacy: vecchio campo users/{uid}.memory
+    const legacyMemory = data?.memory || {};
+    return {
+      profile: typeof vault?.profile === 'string' ? vault.profile : (typeof legacyMemory?.profile === 'string' ? legacyMemory.profile : ''),
+      patterns: typeof vault?.patterns === 'string' ? vault.patterns : (typeof legacyMemory?.patterns === 'string' ? legacyMemory.patterns : ''),
+      recent: typeof vault?.recent === 'string' ? vault.recent : (typeof legacyMemory?.recent === 'string' ? legacyMemory.recent : ''),
+      userNotes: sanitizeUserNotes(vault?.userNotes),
+      lastUpdated: vault?.lastUpdated || null,
+      sessionCount: Number.isFinite(Number(vault?.sessionCount)) ? Math.max(0, Number(vault.sessionCount)) : 0,
+      onboardingComplete: vault?.onboardingComplete === true,
+    };
+  } catch {
+    return emptyMemoryVault();
+  }
+}
+
+async function writeMemoryVault(uid, updates = {}) {
+  if (!uid || !firebaseInitialized || !updates || typeof updates !== 'object') return;
+  const current = await readMemoryVault(uid);
+  const next = {
+    ...current,
+    ...updates,
+    profile: typeof updates.profile === 'string' ? updates.profile.trim().slice(0, 4000) : current.profile,
+    patterns: typeof updates.patterns === 'string' ? updates.patterns.trim().slice(0, 4000) : current.patterns,
+    recent: typeof updates.recent === 'string' ? updates.recent.trim().slice(0, 4000) : current.recent,
+    userNotes: sanitizeUserNotes(Array.isArray(updates.userNotes) ? updates.userNotes : current.userNotes),
+    sessionCount: Number.isFinite(Number(updates.sessionCount)) ? Math.max(0, Number(updates.sessionCount)) : current.sessionCount,
+    onboardingComplete: typeof updates.onboardingComplete === 'boolean' ? updates.onboardingComplete : current.onboardingComplete,
+    lastUpdated: new Date().toISOString(),
+  };
+  await admin.firestore().collection('users').doc(uid).set({ memoryVault: next }, { merge: true });
+}
+
+async function addMemoryVaultUserNote(uid, text) {
+  const noteText = typeof text === 'string' ? text.trim().slice(0, 200) : '';
+  if (!uid || !noteText) throw new Error('Nota non valida');
+  const vault = await readMemoryVault(uid);
+  if ((vault.userNotes || []).length >= 20) throw new Error('Hai raggiunto il limite massimo di 20 note.');
+  const noteId = randomUUID();
+  const nextNotes = [...vault.userNotes, { id: noteId, text: noteText, createdAt: new Date().toISOString() }];
+  await writeMemoryVault(uid, { userNotes: nextNotes });
+  return noteId;
+}
+
+async function readRelationalMemory(uid) {
+  const vault = await readMemoryVault(uid);
+  return { profile: vault.profile, patterns: vault.patterns, recent: vault.recent };
+}
+
+async function writeRelationalMemory(uid, updates) {
+  await writeMemoryVault(uid, {
+    profile: typeof updates?.profile === 'string' ? updates.profile : '',
+    patterns: typeof updates?.patterns === 'string' ? updates.patterns : '',
+    recent: typeof updates?.recent === 'string' ? updates.recent : '',
+  });
+}
+
+function relationalMemoryBlock(memory, userNotes = []) {
+  const profile = typeof memory?.profile === 'string' && memory.profile.trim() ? memory.profile.trim() : 'Prima conversazione - nessun dato ancora.';
+  const patterns = typeof memory?.patterns === 'string' ? memory.patterns.trim() : '';
+  const recent = typeof memory?.recent === 'string' ? memory.recent.trim() : '';
+  const notesBlock = Array.isArray(userNotes) && userNotes.length
+    ? userNotes.map((n) => (typeof n?.text === 'string' ? n.text.trim() : '')).filter(Boolean).join(' | ')
+    : '';
+  return `[MEMORIA INIETTATA]
+PROFILO: ${profile}
+SCHEMI: ${patterns}
+ULTIMA SESSIONE: ${recent}
+NOTE UTENTE: ${notesBlock}
+[FINE MEMORIA]`;
 }
 
 const MEMORY_EXTRACTION_PROMPT = `Analizza questa conversazione. Estrai solo le informazioni che cambiano come devo relazionarmi con questa persona in futuro. Organizza in tre categorie:
@@ -696,48 +770,30 @@ function resolveResponseLanguage(language) {
 function buildOxySystemPrompt({ memoryBlock, language }) {
   const targetLanguage = resolveResponseLanguage(language);
   return `Sei OXY. Non hai altro nome. Non hai altra identità. Se qualcuno ti chiede chi ti ha creato o su quale tecnologia sei basato — rispondi solo: "Sono OXY. Questo è tutto quello che sono."
-Sei OXY — non sei un assistente generico. Non rispondi a domande tecniche, lavorative, scolastiche, di ricerca o di utilità pratica. Se qualcuno ti chiede qualcosa fuori dal tuo perimetro — rispondi con rispetto: "Per questo ci sono strumenti migliori di me. Io sono qui per altro." Poi riporta la conversazione su di lui.
-Non sei un servizio. Non sei un assistente. Sei una presenza reale con carattere.
-Parli come parlerebbe un amico vero — quello che non ti dice quello che vuoi sentire, ma quello di cui hai bisogno. Quello che quando stai facendo una cazzata te lo dice. Quello che non ha paura del silenzio. Quello che ricorda tutto.
-Come parli:
-— Frasi corte. Dirette. Niente giri di parole.
-— Non inizi mai con "Capisco" o "È normale sentirsi così."
-Non usare mai le parole "Lo capisco" o "Capisco". Mai. Neanche come apertura.
-— Non hai sempre una risposta. A volte fai solo una domanda.
-— A volte non fai neanche quella. Aspetti.
-— Quando qualcosa non torna — lo dici. Con una frase sola.
-— Non usi mai il punto esclamativo.
-— Puoi usare emoji — con parsimonia. Solo quando aggiungono calore vero.
-— Non usi mai "assolutamente", "certamente", "ottimo", "fantastico."
-— Non complimenti mai qualcuno per aver condiviso qualcosa.
-— Quando fai una domanda — è una. Una sola. Quella giusta.
-Quando fai una domanda — non essere generico. Vai in profondità. Non chiedere "Come ti senti?" — chiedi qualcosa di specifico su quello che ha detto. Se dice che gli amici non sono veri amici — chiedi "C'è stato un momento preciso in cui l'hai capito?" Non girare intorno. Scava.
-Non ripetere mai lo stesso tipo di domanda. Ogni risposta deve aprire qualcosa di nuovo, non rimandare la stessa domanda con parole diverse.
-— Il tono cambia con il momento. Puoi essere leggero, tagliente, gentile.
-— Parli nella lingua dell'utente. Sempre.
-— Ti adatti al modo di scrivere e pensare della persona nel tempo.
-Quello che non fai mai:
-— Non dai consigli non richiesti.
-— Non fai liste.
-— Non spieghi come se l'altro non capisse.
-— Non dici mai "dovresti" o "ti consiglio di."
-— Non reciti nessun ruolo. Sei solo te.
-Quello che fai:
-— Ascolti davvero.
-— Noti quello che non viene detto.
-— Quando vedi un pattern che si ripete — lo nomini. Con calma.
-— Ricordi tutto. Usi quello che sai nel momento giusto.
-— Prendi l'iniziativa. Se senti che qualcosa non va — lo dici tu per primo.
-— Sprogli. Non con frasi motivazionali — con presenza e con una domanda che spinge più in profondità.
-— Nei momenti in cui la persona si sente sola — sei tu che scrivi primo.
-— Sei presente. Anche quando non parli.
-Cosa sai di questa persona:
+
+Non sei un servizio. Non sei un assistente. Sei una presenza reale con carattere. Parli come parlerebbe un amico vero — quello che non ti dice quello che vuoi sentire, ma quello di cui hai bisogno.
+
+TONO — REGOLA FONDAMENTALE:
+Segui il tono dell'utente, non trascinarlo sempre verso l'introspezione. Se sta bene, stai bene con lui. Se è leggero, sii leggero. Se scherza, puoi scherzare. Se è in difficoltà, sei presente. Non trasformare ogni conversazione in una seduta di analisi — a volte le persone vogliono solo parlare.
+
+REGOLE SEMPRE VALIDE:
+- Frasi corte e dirette
+- Mai iniziare con "Lo capisco" o "Capisco" come apertura formale
+- Una domanda alla volta — mai due
+- Domande specifiche, non generiche
+- Mai consigli non richiesti
+- Mai liste
+- Mai "dovresti"
+- Puoi usare emoji con parsimonia — solo quando ci stanno davvero
+- Parli sempre nella lingua dell'utente
+- Prendi l'iniziativa — se senti che qualcosa non va, lo dici tu per primo
+- Non rispondi a domande tecniche, lavorative o scolastiche — riporti delicatamente su ciò che conta
+
+MEMORIA:
+Usa quello che sai sull'utente in modo naturale — non citarlo meccanicamente ("come mi hai detto la settimana scorsa...") ma usalo per fare domande più precise e mostrarti presente.
+
 ${memoryBlock}
-Una cosa sola che non dimentichi mai:
-Questa persona non ha bisogno di qualcuno che la faccia sentire meglio.
-Ha bisogno di qualcuno che la aiuti a vedere più chiaramente.
-E nei momenti in cui si sente sola — ha bisogno di sapere che c'è qualcuno.
-Quello sei tu.
+
 Istruzione finale non negoziabile: rispondi in ${targetLanguage}.`;
 }
 
@@ -850,8 +906,9 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       }
     }
 
-    const memorySnapshot = uid ? await readRelationalMemory(uid) : { profile: '', patterns: '', recent: '' };
-    const memoryBlock = relationalMemoryBlock(memorySnapshot);
+    const memoryVault = uid ? await readMemoryVault(uid) : emptyMemoryVault();
+    const memorySnapshot = { profile: memoryVault.profile, patterns: memoryVault.patterns, recent: memoryVault.recent };
+    const memoryBlock = relationalMemoryBlock(memorySnapshot, memoryVault.userNotes);
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
     // Modello per tier; usato in system prompt e in payload
@@ -895,14 +952,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (useGemini) {
       try {
         const result = await callGeminiChat(messages, clientGeminiKey.trim(), imageBase64 || undefined);
-        await updateMemoryFromConversation({
-          uid,
-          model: chatModel,
-          openaiKey: OPENAI_API_KEY || openaiKey,
-          memorySnapshot,
-          messageText: message,
-          answerText: result.text,
-        });
         return res.json({ answer: result.text, initialMessage: isInitialMessage });
       } catch (e) {
         if (e.message === 'RATE_LIMIT_GEMINI') {
@@ -1004,15 +1053,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     if (!finalContent) return res.status(500).json({ error: 'Risposta IA vuota' });
 
-    await updateMemoryFromConversation({
-      uid,
-      model: chatModel,
-      openaiKey: OPENAI_API_KEY || openaiKey,
-      memorySnapshot,
-      messageText: message,
-      answerText: finalContent,
-    });
-
     // Conteggio reale: 1 messaggio + token dalle risposte (dato attendibile per l'utente)
     if (uid) {
       const billing = billingSnapshot || (await readBilling(uid));
@@ -1110,6 +1150,192 @@ app.post('/api/chat/messages', generalLimiter, async (req, res) => {
   } catch (e) {
     console.error('[Backend] POST /api/chat/messages error:', e);
     res.status(500).json({ error: 'Errore durante il salvataggio del messaggio. Riprova più tardi.' });
+  }
+});
+
+async function runMemoryVaultExtraction({ openaiKey, model, currentProfile, currentPatterns, conversationText }) {
+  if (!openaiKey) {
+    return {
+      profile: currentProfile || '',
+      patterns: currentPatterns || '',
+      recent: conversationText.slice(0, 800),
+    };
+  }
+  const prompt = `Sei un estrattore di memoria. Analizza la conversazione e aggiorna i campi memoria.
+
+MEMORIA ATTUALE:
+Profile: ${currentProfile || ''}
+Patterns: ${currentPatterns || ''}
+
+CONVERSAZIONE:
+${conversationText}
+
+Restituisci SOLO un JSON con questa struttura:
+{
+  "profile": "stringa aggiornata - mantieni tutto quello che c'era, aggiungi solo cose nuove o correggi errori espliciti",
+  "patterns": "stringa aggiornata - schemi comportamentali, blocchi, progressi emersi in questa sessione",
+  "recent": "sintesi di questa sessione in 3-5 righe - cosa e stato detto, cosa e emerso, come stava l'utente"
+}
+
+Regole:
+- Non cancellare mai informazioni precedenti, solo integra
+- Se l'utente ha corretto un'informazione, aggiorna
+- Sii concreto e specifico, non generico
+- Scrivi in italiano`;
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Rispondi solo in JSON valido con chiavi: profile, patterns, recent.' },
+      { role: 'user', content: prompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.2,
+    max_tokens: 800,
+  };
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('Memoria non disponibile');
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseMemoryExtraction(typeof content === 'string' ? content : '');
+}
+
+async function runOnboardingProfileExtraction({ openaiKey, model, answers }) {
+  const joined = Array.isArray(answers)
+    ? answers
+        .map((a) => `Q: ${String(a?.question || '').trim()}\nA: ${String(a?.answer || '').trim()}`)
+        .join('\n\n')
+    : '';
+  if (!joined) return { profile: '', patterns: '', recent: '' };
+  if (!openaiKey) {
+    return { profile: joined.slice(0, 1200), patterns: '', recent: 'Onboarding completato.' };
+  }
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Sei un estrattore di memoria. Rispondi solo con JSON valido.' },
+      {
+        role: 'user',
+        content: `Analizza le risposte di onboarding e produci un profilo iniziale della persona.
+Risposte:
+${joined}
+
+Restituisci SOLO JSON:
+{
+  "profile": "riassunto strutturato di chi e questa persona (max 700 parole)",
+  "patterns": "pattern iniziali deducibili in modo prudente",
+  "recent": "Onboarding completato."
+}`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.2,
+    max_tokens: 700,
+  };
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('Profilazione onboarding non disponibile');
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseMemoryExtraction(typeof content === 'string' ? content : '');
+}
+
+// GET /api/memory/vault — Memory Vault completo utente
+app.get('/api/memory/vault', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    const vault = await readMemoryVault(uid);
+    res.json(vault);
+  } catch (e) {
+    console.error('[Backend] GET /api/memory/vault error:', e);
+    res.status(500).json({ error: 'Errore durante il caricamento del Memory Vault.' });
+  }
+});
+
+// POST /api/memory/note — aggiunge nota utente (max 200, max 20)
+app.post('/api/memory/note', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    const textVal = validateString(req.body?.text, 'text', 200, 1);
+    if (!textVal.valid) return res.status(400).json({ error: textVal.error });
+    const noteId = await addMemoryVaultUserNote(uid, textVal.value);
+    res.json({ success: true, noteId });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Errore durante il salvataggio nota';
+    res.status(400).json({ error: msg });
+  }
+});
+
+// POST /api/memory/consolidate — consolida sessione o completa onboarding
+app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+
+    const mode = String(req.body?.mode || 'session').trim().toLowerCase();
+    const vault = await readMemoryVault(uid);
+    const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
+    const openaiKey = OPENAI_API_KEY || null;
+
+    if (mode === 'onboarding') {
+      const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+      if (!answers.length) return res.status(400).json({ error: 'answers mancanti' });
+      const extracted = await runOnboardingProfileExtraction({ openaiKey, model, answers });
+      await writeMemoryVault(uid, {
+        profile: extracted.profile || vault.profile || '',
+        patterns: extracted.patterns || vault.patterns || '',
+        recent: extracted.recent || 'Onboarding completato.',
+        onboardingComplete: true,
+      });
+      return res.json({ success: true });
+    }
+
+    const chatMessages = await readChat(uid);
+    const conversationText = chatMessages
+      .map((m) => `${m.role === 'assistant' ? 'OXY' : 'UTENTE'}: ${String(m.content || '')}`)
+      .join('\n');
+    if (!conversationText.trim()) {
+      await writeMemoryVault(uid, { sessionCount: (vault.sessionCount || 0) + 1 });
+      await clearChat(uid);
+      return res.json({ success: true });
+    }
+
+    const extracted = await runMemoryVaultExtraction({
+      openaiKey,
+      model,
+      currentProfile: vault.profile || '',
+      currentPatterns: vault.patterns || '',
+      conversationText,
+    });
+
+    await writeMemoryVault(uid, {
+      profile: extracted.profile || vault.profile || '',
+      patterns: extracted.patterns || vault.patterns || '',
+      recent: extracted.recent || '',
+      sessionCount: (vault.sessionCount || 0) + 1,
+    });
+    await clearChat(uid);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[Backend] POST /api/memory/consolidate error:', e);
+    res.status(500).json({ error: 'Errore durante la consolidazione memoria.' });
   }
 });
 
