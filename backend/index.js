@@ -543,6 +543,14 @@ async function readMemoryVault(uid) {
   }
 }
 
+/** Questionario Memory Vault in corso (almeno un progresso o una risposta salvata), non ancora completato. */
+function userHasActiveMemoryOnboardingQuestionnaire(vault) {
+  if (!vault || vault.onboardingComplete === true) return false;
+  const p = Number(vault.onboardingProgress) || 0;
+  const rawLen = Array.isArray(vault?.onboardingRawAnswers) ? vault.onboardingRawAnswers.length : 0;
+  return p > 0 || rawLen > 0;
+}
+
 async function writeMemoryVault(uid, updates = {}) {
   if (!uid || !firebaseInitialized || !updates || typeof updates !== 'object') return;
   const current = await readMemoryVault(uid);
@@ -713,6 +721,8 @@ function computePaidChatAccess(billing) {
 /** Cronologia/salvataggio messaggi: stessi diritti della chat server-side (piano OXY o credito token). */
 async function canUseChatPersistence(uid, billingSnapshot = null) {
   if (!uid) return false;
+  const vault = await readMemoryVault(uid);
+  if (userHasActiveMemoryOnboardingQuestionnaire(vault)) return true;
   const billing = billingSnapshot != null ? billingSnapshot : await readBilling(uid);
   if (computePaidChatAccess(billing).hasPlan) return true;
   return (await readTokenBalance(uid)) > 0;
@@ -851,6 +861,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     let uid = null;
     let billingSnapshot = null;
     let isMasterUser = false;
+    let memoryVaultForPrompt = emptyMemoryVault();
+    let allowOnboardingUse = false;
 
     if (idToken && firebaseInitialized) {
       const authData = await requireAuth(idToken);
@@ -865,6 +877,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
           return res.status(403).json({ error: 'Verifica la tua email prima di usare OXY in chat.' });
         }
         isMasterUser = !!(email && isMaster(email));
+        if (uid && firebaseInitialized) {
+          memoryVaultForPrompt = await readMemoryVault(uid);
+          allowOnboardingUse = userHasActiveMemoryOnboardingQuestionnaire(memoryVaultForPrompt);
+        }
         if (isMasterUser && OPENAI_API_KEY) {
           openaiKey = OPENAI_API_KEY;
         } else if (OPENAI_API_KEY) {
@@ -875,7 +891,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
           const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
           const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing);
           const lifetimeOk = mode === 'payment' && status === 'paid';
-          const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk;
+          const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk || allowOnboardingUse;
           if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
         }
       }
@@ -910,7 +926,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (uid && openaiKey === OPENAI_API_KEY && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
       const paid = computePaidChatAccess(billing);
-      if (!paid.hasPlan && !useTokenPack) {
+      if (!paid.hasPlan && !useTokenPack && !allowOnboardingUse) {
         return res.status(403).json({ error: 'Nessun piano attivo. Attiva un abbonamento o un piano Lifetime per continuare.' });
       }
       const day = dateISO();
@@ -924,7 +940,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       }
     }
 
-    const memoryVault = uid ? await readMemoryVault(uid) : emptyMemoryVault();
+    const memoryVault = memoryVaultForPrompt;
     const memorySnapshot = { profile: memoryVault.profile, patterns: memoryVault.patterns, recent: memoryVault.recent };
     const memoryBlock = relationalMemoryBlock(memorySnapshot, memoryVault.userNotes, Number(memoryVault.sessionCount || 0));
 
