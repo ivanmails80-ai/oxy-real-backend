@@ -772,33 +772,36 @@ async function uidHasServerOpenAiAccess(uid) {
   return (await readTokenBalance(uid)) > 0;
 }
 
-function formatSessionHistoryForPrompt(sessionHistory) {
-  if (!Array.isArray(sessionHistory) || !sessionHistory.length) return '(nessuno scambio precedente in questa sessione strutturata)';
-  const lines = sessionHistory
-    .slice(-24)
-    .map((m) => {
-      const role = m?.role === 'assistant' ? 'OXY' : 'UTENTE';
-      const c = typeof m?.content === 'string' ? m.content.trim().slice(0, 1200) : '';
-      return c ? `${role}: ${c}` : '';
-    })
-    .filter(Boolean);
-  return lines.length ? lines.join('\n') : '(nessuno scambio precedente in questa sessione strutturata)';
+/** Virgolette singole/apostrofi nelle domande → doppie (leggibilità TTS / UI). */
+function sanitizeOxySessionQuestionText(q) {
+  let s = String(q || '').trim();
+  s = s.replace(/\u2018|\u2019/g, "'");
+  s = s.replace(/'/g, '"');
+  return s.slice(0, 520);
 }
 
-function parseSessionQuestionsJson(rawText) {
-  const out = [];
-  if (!rawText || typeof rawText !== 'string') return out;
+function parseSessionSingleQuestionJson(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
   try {
     const obj = JSON.parse(rawText);
-    const arr = Array.isArray(obj?.questions) ? obj.questions : Array.isArray(obj) ? obj : [];
-    for (const q of arr) {
-      if (typeof q === 'string' && q.trim()) out.push(q.trim().slice(0, 520));
-      if (out.length >= 10) break;
-    }
+    const q = typeof obj?.question === 'string' ? obj.question : typeof obj?.q === 'string' ? obj.q : '';
+    return sanitizeOxySessionQuestionText(q);
   } catch (_) {
-    /* ignore */
+    return '';
   }
-  return out;
+}
+
+function formatPreviousQaBlock(previousQa) {
+  if (!Array.isArray(previousQa) || !previousQa.length) {
+    return '(Prima domanda della sessione: ancora nessuna risposta dell\'utente. Parti dal tema.)';
+  }
+  return previousQa
+    .map((row, i) => {
+      const dq = typeof row?.question === 'string' ? row.question.trim() : '';
+      const da = typeof row?.answer === 'string' ? row.answer.trim() : '';
+      return `Turno ${i + 1}\nDomanda OXY: ${dq}\nRisposta utente: ${da}`;
+    })
+    .join('\n\n');
 }
 
 function parseSessionInsightJson(rawText) {
@@ -815,53 +818,145 @@ function parseSessionInsightJson(rawText) {
   }
 }
 
-async function runOxySessionQuestionsOpenAI({ openaiKey, model, theme, profile, sessionHistory }) {
-  const profileBlock = String(profile || '').trim().slice(0, 4000) || '(profilo non ancora ricco — resta concreto lo stesso.)';
-  const hist = formatSessionHistoryForPrompt(sessionHistory);
-  const userPrompt = `Tema scelto dall'utente: "${theme}".
+/** Prima domanda: tema + profilo come sfondo. */
+async function runOxySessionFirstQuestionOpenAI({ openaiKey, model, theme, profile }) {
+  const profileBlock = String(profile || '').trim().slice(0, 2000) || '(profilo ancora scarso.)';
+  const userPrompt = `Tema sessione: "${theme}".
 
-PROFILO MEMORIA (contesto, non citare alla lettera):
+PROFILO (solo contesto di sfondo — non interrogarlo come lista; serve a non essere generico):
 ${profileBlock}
 
-Scambi già avvenuti in questa sessione strutturata (se utile per coerenza):
-${hist}
+Scrivi UNA sola domanda in italiano, calda e precisa, che apra la sessione su questo tema.
+Niente prefissi numerati. Nessuna virgoletta singola nel testo (usa virgolette doppie se servono).
 
-Genera tra 8 e 10 domande in italiano, UNA per riga concettuale nell'array JSON.
-Le prime 8 sono obbligatorie; se serve approfondire davvero, aggiungi fino a 2 domande extra (massimo 10 in totale).
-Ogni domanda deve essere specifica per questa persona e questo tema — niente domande da manuale generico.
-Niente prefissi numerati nel testo della domanda. Tono caldo, diretto, come OXY in chat.
-
-Rispondi solo JSON: {"questions":["...","..."]}`;
+Rispondi solo JSON: {"question":"..."}`;
 
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
     messages: [
-      {
-        role: 'system',
-        content: 'Sei OXY. Rispondi solo con JSON valido: oggetto con chiave "questions" (array di stringhe, 8-10 elementi).',
-      },
+      { role: 'system', content: 'Sei OXY. Rispondi solo con JSON: {"question":"..."}.' },
       { role: 'user', content: userPrompt },
     ],
     response_format: { type: 'json_object' },
     temperature: 0.55,
-    max_tokens: 600,
+    max_tokens: 220,
   };
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Generazione domande sessione non disponibile');
+  if (!res.ok) throw new Error('Generazione domanda sessione non disponibile');
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
-  return parseSessionQuestionsJson(typeof content === 'string' ? content : '');
+  return parseSessionSingleQuestionJson(typeof content === 'string' ? content : '');
+}
+
+/**
+ * Domanda successiva: deve costruirsi sulla risposta appena data (e sul filo dei turni precedenti).
+ * Il profilo è solo sfondo.
+ */
+async function runOxySessionFollowupQuestionOpenAI({ openaiKey, model, theme, profile, previousQa }) {
+  const profileBlock = String(profile || '').trim().slice(0, 1200) || '(profilo scarso.)';
+  const qaBlock = formatPreviousQaBlock(previousQa);
+  const lastAns = previousQa?.length
+    ? String(previousQa[previousQa.length - 1]?.answer || '').trim().slice(0, 4000)
+    : '';
+  const userPrompt = `Tema sessione: "${theme}".
+
+PROFILO (contesto di sfondo, non lista di controllo):
+${profileBlock}
+
+Storia della sessione fin qui (domanda → risposta):
+${qaBlock}
+
+ULTIMA RISPOSTA DELL'UTENTE (priorità assoluta — la prossima domanda deve agganciarsi a parole, immagini, emozioni o tensioni emerse qui):
+${lastAns || '(vuota)'}
+
+Scrivi UNA sola nuova domanda in italiano che approfondisce ciò che l'utente ha appena messo in campo — come in una conversazione profonda, non come un questionario.
+Non ripetere la domanda precedente. Non fare meta-commenti sul processo.
+Niente virgolette singole nel testo (usa "..." se serve).
+
+Rispondi solo JSON: {"question":"..."}`;
+
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Sei OXY. Rispondi solo con JSON: {"question":"..."}.' },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.58,
+    max_tokens: 260,
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Generazione domanda sessione non disponibile');
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseSessionSingleQuestionJson(typeof content === 'string' ? content : '');
+}
+
+async function runOxySessionRefocusQuestionOpenAI({
+  openaiKey,
+  model,
+  theme,
+  profile,
+  previousQa,
+  anchorAnswer,
+  dismissedQuestion,
+  protestText,
+}) {
+  const profileBlock = String(profile || '').trim().slice(0, 1200) || '(profilo scarso.)';
+  const qaBlock = formatPreviousQaBlock(previousQa);
+  const userPrompt = `Tema sessione: "${theme}".
+
+PROFILO (sfondo):
+${profileBlock}
+
+Percorso fin qui:
+${qaBlock}
+
+L'utente non ha collegato con la domanda attuale. Ha scritto: "${String(protestText || '').trim().slice(0, 400)}"
+Domanda che non ha funzionato: "${String(dismissedQuestion || '').trim().slice(0, 520)}"
+
+Risposta di riferimento su cui vuoi ricentrarti (ultima risposta sostanziosa):
+${String(anchorAnswer || '').trim().slice(0, 4000)}
+
+Scrivi UNA nuova domanda diversa, sempre in italiano, che riporti il filo alla risposta di riferimento — breve preambolo empatico nella stessa frase se serve, senza moralismi.
+Niente virgolette singole.
+
+Rispondi solo JSON: {"question":"..."}`;
+
+  const payload = {
+    model: model || OPENAI_CHAT_MODEL,
+    messages: [
+      { role: 'system', content: 'Sei OXY. Rispondi solo con JSON: {"question":"..."}.' },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.55,
+    max_tokens: 260,
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Rifocalizzazione domanda non disponibile');
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return parseSessionSingleQuestionJson(typeof content === 'string' ? content : '');
 }
 
 async function runOxySessionInsightOpenAI({ openaiKey, model, theme, profile, questions, answers }) {
   const qaLines = [];
   const n = Math.min(questions.length, answers.length);
   for (let i = 0; i < n; i++) {
-    qaLines.push(`D: ${questions[i]}\nR: ${answers[i]}`);
+    qaLines.push(`D: ${sanitizeOxySessionQuestionText(questions[i])}\nR: ${answers[i]}`);
   }
   const qaBlock = qaLines.join('\n\n');
   const profileBlock = String(profile || '').trim().slice(0, 4000) || '(profilo limitato)';
@@ -1845,7 +1940,18 @@ app.post('/api/session/active', generalLimiter, async (req, res) => {
   }
 });
 
-// POST /api/session/questions — genera 8–10 domande personalizzate (Sessione OXY)
+function sanitizePreviousQaPayload(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => ({
+      question: typeof row?.question === 'string' ? row.question.trim().slice(0, 520) : '',
+      answer: typeof row?.answer === 'string' ? row.answer.trim().slice(0, 8000) : '',
+    }))
+    .filter((r) => r.question && r.answer)
+    .slice(0, 12);
+}
+
+// POST /api/session/questions — compat: restituisce array con una sola prima domanda
 app.post('/api/session/questions', generalLimiter, async (req, res) => {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
@@ -1858,22 +1964,73 @@ app.post('/api/session/questions', generalLimiter, async (req, res) => {
     const theme = typeof req.body?.theme === 'string' ? req.body.theme.trim() : '';
     if (!OXY_SESSION_THEMES.has(theme)) return res.status(400).json({ error: 'Tema non valido.' });
     const profile = typeof req.body?.profile === 'string' ? req.body.profile.trim().slice(0, 4000) : '';
-    const sessionHistory = Array.isArray(req.body?.sessionHistory) ? req.body.sessionHistory : [];
     const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
-    const questions = await runOxySessionQuestionsOpenAI({
+    const q = await runOxySessionFirstQuestionOpenAI({
       openaiKey: OPENAI_API_KEY,
       model,
       theme,
       profile,
-      sessionHistory,
     });
-    if (questions.length < 8) {
-      return res.status(500).json({ error: 'Domande sessione insufficienti. Riprova.' });
-    }
-    res.json({ questions });
+    if (!q) return res.status(500).json({ error: 'Domanda sessione non generata. Riprova.' });
+    res.json({ questions: [q] });
   } catch (e) {
     console.error('[Backend] POST /api/session/questions error:', e);
     res.status(500).json({ error: e instanceof Error ? e.message : 'Errore generazione domande sessione.' });
+  }
+});
+
+// POST /api/session/next-question — una domanda alla volta, agganciata all'ultima risposta
+app.post('/api/session/next-question', generalLimiter, async (req, res) => {
+  try {
+    const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
+    const { uid } = await requireAuth(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token mancante o non valido' });
+    if (!(await uidHasServerOpenAiAccess(uid))) {
+      return res.status(403).json({ error: 'Piano o crediti non sufficienti per avviare la sessione.' });
+    }
+    if (!OPENAI_API_KEY) return res.status(503).json({ error: 'Servizio sessione non configurato.' });
+    const theme = typeof req.body?.theme === 'string' ? req.body.theme.trim() : '';
+    if (!OXY_SESSION_THEMES.has(theme)) return res.status(400).json({ error: 'Tema non valido.' });
+    const profile = typeof req.body?.profile === 'string' ? req.body.profile.trim().slice(0, 4000) : '';
+    const previousQa = sanitizePreviousQaPayload(req.body?.previousQa);
+    const mode = String(req.body?.mode || 'followup').trim().toLowerCase();
+    const model = OPENAI_MODEL_OXY_PASS || OPENAI_CHAT_MODEL;
+    let q = '';
+    if (mode === 'first') {
+      q = await runOxySessionFirstQuestionOpenAI({ openaiKey: OPENAI_API_KEY, model, theme, profile });
+    } else if (mode === 'refocus') {
+      const rf = req.body?.refocus && typeof req.body.refocus === 'object' ? req.body.refocus : {};
+      const anchorAnswer = typeof rf.anchorAnswer === 'string' ? rf.anchorAnswer.trim().slice(0, 8000) : '';
+      const dismissedQuestion = typeof rf.dismissedQuestion === 'string' ? rf.dismissedQuestion.trim().slice(0, 520) : '';
+      const protestText = typeof rf.protestText === 'string' ? rf.protestText.trim().slice(0, 600) : '';
+      if (!anchorAnswer || !dismissedQuestion) {
+        return res.status(400).json({ error: 'Rifocalizzazione: dati mancanti.' });
+      }
+      q = await runOxySessionRefocusQuestionOpenAI({
+        openaiKey: OPENAI_API_KEY,
+        model,
+        theme,
+        profile,
+        previousQa,
+        anchorAnswer,
+        dismissedQuestion,
+        protestText,
+      });
+    } else {
+      if (!previousQa.length) return res.status(400).json({ error: 'previousQa richiesto per la domanda successiva.' });
+      q = await runOxySessionFollowupQuestionOpenAI({
+        openaiKey: OPENAI_API_KEY,
+        model,
+        theme,
+        profile,
+        previousQa,
+      });
+    }
+    if (!q) return res.status(500).json({ error: 'Domanda non generata. Riprova.' });
+    res.json({ question: q });
+  } catch (e) {
+    console.error('[Backend] POST /api/session/next-question error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Errore generazione domanda sessione.' });
   }
 });
 
