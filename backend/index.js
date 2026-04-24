@@ -593,9 +593,9 @@ async function writeRelationalMemory(uid, updates) {
   });
 }
 
-function relationalMemoryBlock(memory, userNotes = []) {
+function relationalMemoryBlock(memory, userNotes = [], sessionCount = 0) {
   const profile = typeof memory?.profile === 'string' && memory.profile.trim() ? memory.profile.trim() : 'Prima conversazione - nessun dato ancora.';
-  const patterns = typeof memory?.patterns === 'string' ? memory.patterns.trim() : '';
+  const patterns = sessionCount < 3 ? 'OXY costruirà i tuoi schemi nel tempo.' : (typeof memory?.patterns === 'string' ? memory.patterns.trim() : '');
   const recent = typeof memory?.recent === 'string' ? memory.recent.trim() : '';
   const notesBlock = Array.isArray(userNotes) && userNotes.length
     ? userNotes.map((n) => (typeof n?.text === 'string' ? n.text.trim() : '')).filter(Boolean).join(' | ')
@@ -645,7 +645,7 @@ async function updateMemoryFromConversation({ uid, model, openaiKey, memorySnaps
   if (!assistantText) return;
 
   const convo = `Utente:\n${userText || '(nessun testo)'}\n\nOXY:\n${assistantText}`;
-  const currentMemoryBlock = relationalMemoryBlock(memorySnapshot || { profile: '', patterns: '', recent: '' });
+  const currentMemoryBlock = relationalMemoryBlock(memorySnapshot || { profile: '', patterns: '', recent: '' }, [], Number(memorySnapshot?.sessionCount || 0));
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
     messages: [
@@ -926,7 +926,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     const memoryVault = uid ? await readMemoryVault(uid) : emptyMemoryVault();
     const memorySnapshot = { profile: memoryVault.profile, patterns: memoryVault.patterns, recent: memoryVault.recent };
-    const memoryBlock = relationalMemoryBlock(memorySnapshot, memoryVault.userNotes);
+    const memoryBlock = relationalMemoryBlock(memorySnapshot, memoryVault.userNotes, Number(memoryVault.sessionCount || 0));
 
     const isInitialMessage = !!initialMessage && (!message || !String(message).trim());
     // Modello per tier; usato in system prompt e in payload
@@ -1190,7 +1190,7 @@ ${conversationText}
 
 Restituisci SOLO un JSON con questa struttura:
 {
-  "profile": "stringa aggiornata - mantieni tutto quello che c'era, aggiungi solo cose nuove o correggi errori espliciti",
+  "profile": "stringa aggiornata in seconda persona - mantieni tutto quello che c'era, aggiungi solo cose nuove o correggi errori espliciti",
   "patterns": "stringa aggiornata - schemi comportamentali, blocchi, progressi emersi in questa sessione",
   "recent": "sintesi di questa sessione in 3-5 righe - cosa e stato detto, cosa e emerso, come stava l'utente"
 }
@@ -1199,6 +1199,7 @@ Regole:
 - Non cancellare mai informazioni precedenti, solo integra
 - Se l'utente ha corretto un'informazione, aggiorna
 - Sii concreto e specifico, non generico
+- Scrivi sempre in seconda persona rivolgendoti direttamente all'utente (es: "Hai..., vivi..., vuoi...")
 - Scrivi nella stessa lingua usata nella conversazione (${String(language || 'auto')}).`;
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
@@ -1224,7 +1225,7 @@ Regole:
   return parseMemoryExtraction(typeof content === 'string' ? content : '');
 }
 
-async function runOnboardingProfileExtraction({ openaiKey, model, answers }) {
+async function runOnboardingProfileExtraction({ openaiKey, model, answers, language }) {
   const joined = Array.isArray(answers)
     ? answers
         .map((a) => `Q: ${String(a?.question || '').trim()}\nA: ${String(a?.answer || '').trim()}`)
@@ -1232,7 +1233,13 @@ async function runOnboardingProfileExtraction({ openaiKey, model, answers }) {
     : '';
   if (!joined) return { profile: '', patterns: '', recent: '' };
   if (!openaiKey) {
-    return { profile: joined.slice(0, 1200), patterns: '', recent: 'Onboarding completato.' };
+    const fallbackRecent = joined
+      .split('\n')
+      .filter(Boolean)
+      .slice(-6)
+      .join(' ')
+      .slice(0, 1000);
+    return { profile: joined.slice(0, 1200), patterns: '', recent: fallbackRecent };
   }
   const payload = {
     model: model || OPENAI_CHAT_MODEL,
@@ -1246,10 +1253,15 @@ ${joined}
 
 Restituisci SOLO JSON:
 {
-  "profile": "riassunto strutturato di chi e questa persona (max 700 parole)",
-  "patterns": "pattern iniziali deducibili in modo prudente",
-  "recent": "Onboarding completato."
-}`,
+  "profile": "riassunto strutturato in seconda persona (max 700 parole)",
+  "patterns": "",
+  "recent": "sintesi reale dell'onboarding in 3-5 righe, concreta e specifica"
+}
+Regole:
+- Scrivi sempre in seconda persona rivolgendoti direttamente all'utente (es: Hai..., vivi..., vuoi...)
+- Non inventare informazioni
+- Scrivi nella lingua usata dall'utente (${String(language || 'auto')})
+- patterns deve essere stringa vuota`,
       },
     ],
     response_format: { type: 'json_object' },
@@ -1351,11 +1363,13 @@ app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
     if (mode === 'onboarding') {
       const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
       if (!answers.length) return res.status(400).json({ error: 'answers mancanti' });
-      const extracted = await runOnboardingProfileExtraction({ openaiKey, model, answers });
+      const extracted = await runOnboardingProfileExtraction({ openaiKey, model, answers, language: req.body?.language || 'auto' });
+      const nextSessionCount = (vault.sessionCount || 0) + 1;
       await writeMemoryVault(uid, {
         profile: extracted.profile || vault.profile || '',
-        patterns: extracted.patterns || vault.patterns || '',
-        recent: extracted.recent || 'Onboarding completato.',
+        patterns: '',
+        recent: extracted.recent || '',
+        sessionCount: nextSessionCount,
         onboardingComplete: true,
         onboardingProgress: 10,
         onboardingRawAnswers: answers.slice(0, 10),
@@ -1382,11 +1396,12 @@ app.post('/api/memory/consolidate', generalLimiter, async (req, res) => {
       language: req.body?.language || 'auto',
     });
 
+    const nextSessionCount = (vault.sessionCount || 0) + 1;
     await writeMemoryVault(uid, {
       profile: extracted.profile || vault.profile || '',
-      patterns: extracted.patterns || vault.patterns || '',
+      patterns: nextSessionCount < 3 ? '' : (extracted.patterns || vault.patterns || ''),
       recent: extracted.recent || '',
-      sessionCount: (vault.sessionCount || 0) + 1,
+      sessionCount: nextSessionCount,
     });
     await clearChat(uid);
     res.json({ success: true });
