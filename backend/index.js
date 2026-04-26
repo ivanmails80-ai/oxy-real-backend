@@ -44,17 +44,18 @@ const CREDITS_DIR = path.join(DATA_ROOT, 'credits');
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors());
-// Nota Stripe: per verificare la firma del webhook serve l'original raw body.
-// Salviamo il buffer raw su req.rawBody prima del parsing JSON.
-app.use(express.json({
-  limit: '10mb',
-  verify: (req, _res, buf) => {
-    try {
-      // buf è un Buffer (body originale)
-      req.rawBody = buf;
-    } catch (_) {}
-  },
-}));
+// Stripe webhook: body deve restare raw (bytes) per constructEvent — solo queste route.
+const stripeWebhookRawParser = express.raw({ type: 'application/json' });
+const jsonBodyParser = express.json({ limit: '10mb' });
+app.use((req, res, next) => {
+  if (
+    req.method === 'POST' &&
+    (req.path === '/api/billing/webhook' || req.path === '/api/stripe/webhook')
+  ) {
+    return stripeWebhookRawParser(req, res, next);
+  }
+  return jsonBodyParser(req, res, next);
+});
 
 // Rate limiting per protezione API (audit 8.1 - hardening produzione)
 // Limiti per IP/utente ogni 15 minuti:
@@ -248,7 +249,7 @@ function isIsoPast(iso) {
 function computeSubscriptionActive(billing) {
   const status = billing?.status || 'none';
   if (status === 'owner_unlimited') return true;
-  if (status === 'active') return true;
+  if (status === 'active' || status === 'trialing') return true;
   return false;
 }
 
@@ -2222,9 +2223,22 @@ async function writeBilling(uid, data) {
   await admin.firestore().collection('billing').doc(uid).set(payload, { merge: true });
 }
 
-/** Trova l'uid che ha questa stripeSubscriptionId (per webhook subscription.deleted dove metadata non è popolato). */
+/** Trova l'uid che ha questa stripeSubscriptionId (webhook; metadata subscription spesso vuota). */
 async function findUidByStripeSubscriptionId(subscriptionId) {
   if (!subscriptionId || typeof subscriptionId !== 'string') return null;
+  if (firebaseInitialized) {
+    try {
+      const snap = await admin
+        .firestore()
+        .collection('billing')
+        .where('stripeSubscriptionId', '==', subscriptionId)
+        .limit(5)
+        .get();
+      if (!snap.empty) return snap.docs[0].id;
+    } catch (e) {
+      console.warn('[Backend] findUidByStripeSubscriptionId Firestore:', e?.message || e);
+    }
+  }
   await ensureBillingDir();
   let files = [];
   try {
@@ -2244,6 +2258,15 @@ async function findUidByStripeSubscriptionId(subscriptionId) {
     }
   }
   return null;
+}
+
+/** Mappa status Stripe subscription → campo status su billing/{uid}. */
+function mapStripeSubscriptionStatusToBilling(stripeStatus) {
+  const s = String(stripeStatus || '').toLowerCase();
+  if (s === 'active' || s === 'trialing') return 'active';
+  if (s === 'past_due' || s === 'unpaid') return 'past_due';
+  if (s === 'canceled' || s === 'incomplete_expired') return 'cancelled';
+  return s || 'unknown';
 }
 
 /**
@@ -2278,6 +2301,18 @@ async function persistCheckoutSessionBilling(session) {
       }
     }
   }
+  let currentPeriodEnd = null;
+  if (mode === 'subscription' && session.subscription) {
+    const stripeClient = await getStripeClient();
+    if (stripeClient) {
+      try {
+        const sub = await stripeClient.subscriptions.retrieve(String(session.subscription));
+        if (typeof sub?.current_period_end === 'number') currentPeriodEnd = sub.current_period_end;
+      } catch (e) {
+        console.error('[Backend] persistCheckoutSessionBilling subscription retrieve:', e?.message || e);
+      }
+    }
+  }
   await writeBilling(uid, {
     uid,
     planId,
@@ -2285,6 +2320,7 @@ async function persistCheckoutSessionBilling(session) {
     status,
     stripeCustomerId: session.customer || null,
     stripeSubscriptionId: session.subscription || null,
+    ...(currentPeriodEnd != null ? { currentPeriodEnd } : {}),
   });
   return { ok: true, uid, planId };
 }
@@ -2710,17 +2746,52 @@ app.get('/api/subscription/status', billingPollLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/subscription/portal', billingLimiter, async (req, res) => {
+/** Stripe Customer Portal: billing/{uid}.stripeCustomerId */
+async function postBillingPortalHandler(req, res) {
   try {
     const idToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.idToken;
-    const { uid, email } = await requireAuth(idToken);
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
     if (!uid || !email) return res.status(401).json({ error: 'Token mancante o non valido' });
-    return res.status(403).json({ error: 'Portale abbonamento disabilitato: l\'abbonamento resta attivo fino a scadenza naturale.' });
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email prima di aprire il portale.' });
+    }
+    if (!STRIPE_SECRET_KEY) {
+      return res.status(400).json({ error: 'Stripe non configurato lato server (manca STRIPE_SECRET_KEY).' });
+    }
+    const stripe = await getStripeClient();
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe non disponibile (modulo non installato).' });
+    }
+    const billing = await readBilling(uid);
+    const stripeCustomerId = billing?.stripeCustomerId;
+    if (!stripeCustomerId || typeof stripeCustomerId !== 'string') {
+      return res.status(400).json({
+        error: 'Cliente Stripe non trovato. Se hai appena sottoscritto, attendi qualche secondo e riprova.',
+      });
+    }
+    const returnUrl = (process.env.STRIPE_PORTAL_RETURN_URL || 'https://www.oxyreal.it/settings').trim();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: returnUrl,
+    });
+    if (!session?.url) {
+      return res.status(500).json({ error: 'Portale Stripe non ha restituito un URL.' });
+    }
+    return res.json({ url: session.url });
   } catch (e) {
-    console.error('[Backend] POST /api/subscription/portal error:', e);
+    console.error('[Backend] POST billing portal error:', e?.message || e);
+    const msg = typeof e?.message === 'string' ? e.message : '';
+    if (e?.type === 'StripeInvalidRequestError' || e?.rawType === 'invalid_request_error') {
+      return res.status(400).json({ error: msg || 'Richiesta Stripe non valida.' });
+    }
     return res.status(500).json({ error: 'Errore durante apertura portale abbonamento.' });
   }
-});
+}
+
+app.post('/api/billing/portal', billingLimiter, postBillingPortalHandler);
+app.post('/api/subscription/portal', billingLimiter, postBillingPortalHandler);
 
 // POST /api/me/delete-account — Self-service: l'utente autenticato richiede la cancellazione del proprio account. Elimina da Firebase Auth e tutti i dati backend (chat, memoria, diario, billing, storie, usage, credits). Richiesto dal legale per GDPR (diritto all'oblio). Conferma avvocato: "È esattamente ciò che serve per essere GDPR compliant al 100%."
 app.post('/api/me/delete-account', billingLimiter, async (req, res) => {
@@ -2775,8 +2846,24 @@ app.post('/api/me/delete-account', billingLimiter, async (req, res) => {
   }
 });
 
-// POST /api/billing/webhook — webhook Stripe per aggiornare lo stato abbonamento
-app.post('/api/billing/webhook', async (req, res) => {
+async function resolveUidForStripeSubscription(stripe, subscription) {
+  let uid = subscription.metadata?.uid || null;
+  if (!uid) uid = await findUidByStripeSubscriptionId(subscription.id);
+  if (!uid && subscription.customer && stripe) {
+    try {
+      const customer = await stripe.customers.retrieve(String(subscription.customer));
+      const email = typeof customer === 'object' && !customer.deleted ? customer.email : null;
+      if (email && firebaseInitialized) {
+        const userRecord = await admin.auth().getUserByEmail(email.trim().toLowerCase());
+        uid = userRecord?.uid || null;
+      }
+    } catch (_) {}
+  }
+  return uid;
+}
+
+/** POST /api/billing/webhook e POST /api/stripe/webhook — stessa logica (Stripe Dashboard può puntare a entrambi). */
+async function handleStripeWebhook(req, res) {
   try {
     const stripe = await getStripeClient();
     if (!stripe) {
@@ -2791,8 +2878,8 @@ app.post('/api/billing/webhook', async (req, res) => {
       return res.status(400).json({ error: 'Header Stripe-Signature mancante.' });
     }
 
-    const rawBody = req.rawBody;
-    if (!rawBody || !(rawBody instanceof Buffer)) {
+    const rawBody = req.body;
+    if (!Buffer.isBuffer(rawBody)) {
       return res.status(400).json({ error: 'Raw body mancante: impossibile verificare la firma webhook.' });
     }
 
@@ -2837,7 +2924,6 @@ app.post('/api/billing/webhook', async (req, res) => {
       }
     } else if (type === 'customer.subscription.deleted' || type === 'customer.subscription.canceled') {
       const subscription = event.data?.object || {};
-      // Stripe Checkout non copia metadata dalla session alla subscription: cerchiamo l'utente per subscription.id
       let uid = subscription.metadata?.uid || null;
       if (!uid) uid = await findUidByStripeSubscriptionId(subscription.id);
       if (uid) {
@@ -2845,46 +2931,73 @@ app.post('/api/billing/webhook', async (req, res) => {
         await writeBilling(uid, {
           ...current,
           uid,
-          status: 'canceled',
+          status: 'cancelled',
+          mode: 'subscription',
+          planId: current.planId || resolvePlanIdFromPriceId(subscription.items?.data?.[0]?.price?.id) || null,
           stripeSubscriptionId: subscription.id,
+          stripeCustomerId: subscription.customer || current.stripeCustomerId || null,
+          currentPeriodEnd: subscription.current_period_end ?? current.currentPeriodEnd ?? null,
         });
       }
     } else if (type === 'customer.subscription.created' || type === 'customer.subscription.updated') {
       const subscription = event.data?.object || {};
-      let uid = subscription.metadata?.uid || null;
-      if (!uid) uid = await findUidByStripeSubscriptionId(subscription.id);
-      if (!uid && subscription.customer && stripe) {
-        try {
-          const customer = await stripe.customers.retrieve(String(subscription.customer));
-          const email = typeof customer === 'object' && !customer.deleted ? customer.email : null;
-          if (email && firebaseInitialized) {
-            const userRecord = await admin.auth().getUserByEmail(email.trim().toLowerCase());
-            uid = userRecord?.uid || null;
-          }
-        } catch (_) {}
-      }
-      if (uid && subscription.status === 'active') {
+      const uid = await resolveUidForStripeSubscription(stripe, subscription);
+      if (uid) {
         const current = (await readBilling(uid)) || {};
         const priceId = subscription.items?.data?.[0]?.price?.id || null;
         const planId = resolvePlanIdFromPriceId(priceId) || current.planId || subscription.metadata?.planId || null;
+        const billingStatus = mapStripeSubscriptionStatusToBilling(subscription.status);
         await writeBilling(uid, {
           ...current,
           uid,
           planId,
-          status: 'active',
+          status: billingStatus,
           mode: 'subscription',
           stripeSubscriptionId: subscription.id,
+          stripeCustomerId: subscription.customer || current.stripeCustomerId || null,
           currentPeriodEnd: subscription.current_period_end ?? null,
         });
       }
+    } else if (type === 'invoice.payment_failed') {
+      const invoice = event.data?.object || {};
+      const subRef = invoice.subscription;
+      const subId = typeof subRef === 'string' ? subRef : subRef?.id || null;
+      if (subId) {
+        let uid = await findUidByStripeSubscriptionId(subId);
+        if (!uid && invoice.customer && stripe) {
+          try {
+            const customer = await stripe.customers.retrieve(String(invoice.customer));
+            const email = typeof customer === 'object' && !customer.deleted ? customer.email : null;
+            if (email && firebaseInitialized) {
+              const userRecord = await admin.auth().getUserByEmail(email.trim().toLowerCase());
+              uid = userRecord?.uid || null;
+            }
+          } catch (_) {}
+        }
+        if (uid) {
+          const current = (await readBilling(uid)) || {};
+          await writeBilling(uid, {
+            ...current,
+            uid,
+            status: 'past_due',
+            mode: 'subscription',
+            stripeSubscriptionId: subId,
+            stripeCustomerId:
+              (typeof invoice.customer === 'string' ? invoice.customer : null) || current.stripeCustomerId || null,
+          });
+        }
+      }
     }
 
-    res.json({ received: true });
+    return res.json({ received: true });
   } catch (e) {
-    console.error('[Backend] POST /api/billing/webhook error:', e);
-    res.status(500).json({ error: 'Errore durante l\'elaborazione del webhook.' });
+    console.error('[Backend] Stripe webhook error:', e);
+    return res.status(500).json({ error: 'Errore durante l\'elaborazione del webhook.' });
   }
-});
+}
+
+app.post('/api/billing/webhook', (req, res) => handleStripeWebhook(req, res));
+app.post('/api/stripe/webhook', (req, res) => handleStripeWebhook(req, res));
 
 // 0.0.0.0 = accetta connessioni da altri dispositivi in rete (non solo localhost)
 app.listen(PORT, '0.0.0.0', async () => {
