@@ -139,6 +139,14 @@ const STRIPE_PRICE_MAP = {
   oxy_semiannual: process.env.STRIPE_PRICE_OXY_SEMIANNUAL?.trim(),
   oxy_annual: process.env.STRIPE_PRICE_OXY_ANNUAL?.trim(),
 };
+/** Price ID Stripe dedicati al piano founder (test/live da Dashboard). */
+const STRIPE_FOUNDER_PRICE_MAP = {
+  oxy_monthly: process.env.STRIPE_FOUNDER_MONTHLY?.trim(),
+  oxy_semiannual: process.env.STRIPE_FOUNDER_SEMESTER?.trim(),
+  oxy_annual: process.env.STRIPE_FOUNDER_ANNUAL?.trim(),
+};
+/** Opzionale: ID coupon Stripe (es. FOUNDER_LOCK) da applicare in Checkout solo per slot founder. */
+const STRIPE_FOUNDER_COUPON_ID = process.env.STRIPE_FOUNDER_COUPON_ID?.trim();
 // Token inclusi per ogni pacchetto (per webhook)
 const TOKEN_PACK_AMOUNTS = {};
 const STRIPE_SUCCESS_URL = process.env.STRIPE_SUCCESS_URL?.trim();
@@ -157,6 +165,9 @@ const LEGACY_PRICE_TO_PLAN = {
 function resolvePlanIdFromPriceId(priceId) {
   if (!priceId || typeof priceId !== 'string') return null;
   for (const [planId, mappedPriceId] of Object.entries(STRIPE_PRICE_MAP)) {
+    if (mappedPriceId && mappedPriceId === priceId) return planId;
+  }
+  for (const [planId, mappedPriceId] of Object.entries(STRIPE_FOUNDER_PRICE_MAP)) {
     if (mappedPriceId && mappedPriceId === priceId) return planId;
   }
   return LEGACY_PRICE_TO_PLAN[priceId] || null;
@@ -2338,6 +2349,37 @@ async function resolveStripeSubscriptionForUser(stripe, billing = null, email = 
   return pickBestSubscription(Array.from(candidates.values()));
 }
 
+/**
+ * Se c'è posto founder e price ID founder configurato, decrementa remainingSpots e restituisce quel price.
+ * Altrimenti null (il chiamante usa il prezzo standard).
+ */
+async function reserveFounderPriceIdForPlan(planIdVal) {
+  const founderPrice = STRIPE_FOUNDER_PRICE_MAP[planIdVal];
+  if (!founderPrice || !firebaseInitialized) return null;
+  if (!['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal)) return null;
+
+  const ref = admin.firestore().collection('config').doc('founderPricing');
+  try {
+    const out = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { price: null };
+      const data = snap.data() || {};
+      if (data.active !== true) return { price: null };
+      const remaining = Number(data.remainingSpots);
+      const rem = Number.isFinite(remaining) ? remaining : 0;
+      if (rem <= 0) return { price: null };
+      tx.update(ref, {
+        remainingSpots: admin.firestore.FieldValue.increment(-1),
+      });
+      return { price: founderPrice };
+    });
+    return out?.price || null;
+  } catch (e) {
+    console.warn('[Backend] reserveFounderPriceIdForPlan:', e?.message || e);
+    return null;
+  }
+}
+
 // ——— Stripe checkout session (abbonamenti + Lifetime) ———
 app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
   try {
@@ -2370,9 +2412,18 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
       return res.status(500).json({ error: 'Stripe non disponibile (modulo non installato).' });
     }
 
-    const priceId = STRIPE_PRICE_MAP[planIdVal.value];
+    let priceId = STRIPE_PRICE_MAP[planIdVal.value];
     if (!priceId) {
       return res.status(400).json({ error: `Nessun price configurato per il piano ${planIdVal.value}.` });
+    }
+
+    let usedFounder = false;
+    if (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal.value)) {
+      const founderReserved = await reserveFounderPriceIdForPlan(planIdVal.value);
+      if (founderReserved) {
+        priceId = founderReserved;
+        usedFounder = true;
+      }
     }
 
     const isSubscription = ['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal.value);
@@ -2381,7 +2432,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
     const successUrl = buildStripeCheckoutSuccessUrl();
     const cancelUrl = STRIPE_CANCEL_URL || 'https://www.oxyreal.it/settings/billing';
 
-    const session = await stripe.checkout.sessions.create({
+    const sessionPayload = {
       mode,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -2395,8 +2446,14 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
       metadata: {
         uid,
         planId: planIdVal.value,
+        ...(usedFounder ? { founderSpot: '1' } : {}),
       },
-    });
+    };
+    if (usedFounder && STRIPE_FOUNDER_COUPON_ID) {
+      sessionPayload.discounts = [{ coupon: STRIPE_FOUNDER_COUPON_ID }];
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionPayload);
 
     return res.json({ url: session.url });
   } catch (e) {
