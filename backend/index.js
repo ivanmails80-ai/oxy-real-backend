@@ -370,6 +370,102 @@ async function incChatUsage(uid, dayIso, delta = 1) {
   await incUsage(uid, dayIso, delta, 0);
 }
 
+// ——— Chat libera: rate limiting invisibile (Firestore users/{uid}.dailyUsage) ———
+// Solo POST /api/chat con chiave server OpenAI. Nessun errore UX: max_tokens ridotto + delay backend.
+// Diario, sessione, libro, respira, daily-phrase: non passano da qui.
+function parseEnvInt(name, fallback) {
+  const v = process.env[name];
+  if (v == null || v === '') return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+const RATE_LIMIT_L1 = parseEnvInt('RATE_LIMIT_L1', 50);
+const RATE_LIMIT_L2 = parseEnvInt('RATE_LIMIT_L2', 100);
+const RATE_LIMIT_L3 = parseEnvInt('RATE_LIMIT_L3', 150);
+const RATE_LIMIT_DELAY_L3 = parseEnvInt('RATE_LIMIT_DELAY_L3', 8000);
+const RATE_LIMIT_DELAY_L4 = parseEnvInt('RATE_LIMIT_DELAY_L4', 15000);
+
+function dateKeyInTimeZone(ms, timeZone) {
+  const tz = (timeZone && String(timeZone).trim()) || 'UTC';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(ms));
+  } catch {
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+}
+
+/** Allineato alla daily phrase: calendario locale + IANA; fallback UTC. */
+function resolveChatCalendarContext(body = {}) {
+  const tz = typeof body.timeZone === 'string' && body.timeZone.trim() ? body.timeZone.trim() : 'UTC';
+  let ld =
+    typeof body.localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.localDate.trim()) ? body.localDate.trim() : '';
+  if (!ld && typeof body.dateISO === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.dateISO.trim())) {
+    ld = body.dateISO.trim();
+  }
+  if (!ld) ld = dateKeyInTimeZone(Date.now(), tz);
+  return { timeZone: tz, localDate: ld };
+}
+
+/** n = numero messaggio del giorno (1-based) per questa richiesta. */
+function invisibleRateTierForMessageNumber(n) {
+  const num = Math.max(1, Number(n) || 1);
+  if (num <= RATE_LIMIT_L1) return { maxTokens: 500, delayMs: 0, level: 1 };
+  if (num <= RATE_LIMIT_L2) return { maxTokens: 350, delayMs: 0, level: 2 };
+  if (num <= RATE_LIMIT_L3) return { maxTokens: 200, delayMs: RATE_LIMIT_DELAY_L3, level: 3 };
+  return { maxTokens: 100, delayMs: RATE_LIMIT_DELAY_L4, level: 4 };
+}
+
+async function readDailyUsageForTier(uid, localDate) {
+  if (!uid || !firebaseInitialized || !localDate) return 0;
+  try {
+    const snap = await admin.firestore().collection('users').doc(uid).get();
+    const du = snap.data()?.dailyUsage;
+    if (!du || typeof du !== 'object') return 0;
+    if (typeof du.date === 'string' && du.date === localDate && typeof du.count === 'number' && du.count >= 0) {
+      return du.count;
+    }
+    return 0;
+  } catch (e) {
+    console.warn('[Backend] readDailyUsageForTier:', e?.message || e);
+    return 0;
+  }
+}
+
+async function incrementDailyUsageFirestore(uid, timeZone, localDate) {
+  if (!uid || !firebaseInitialized || !localDate) return;
+  try {
+    const ref = admin.firestore().collection('users').doc(uid);
+    await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const du = snap.data()?.dailyUsage;
+      let c = 0;
+      if (du && typeof du === 'object' && du.date === localDate && typeof du.count === 'number' && du.count >= 0) {
+        c = du.count;
+      }
+      const tz = (timeZone && String(timeZone).trim()) || 'UTC';
+      tx.set(
+        ref,
+        {
+          dailyUsage: {
+            count: c + 1,
+            date: localDate,
+            timezone: tz,
+          },
+        },
+        { merge: true },
+      );
+    });
+  } catch (e) {
+    console.warn('[Backend] incrementDailyUsageFirestore:', e?.message || e);
+  }
+}
+
 // ——— Credito token (pacchetti acquistati)
 async function ensureCreditsDir() {
   await fs.mkdir(CREDITS_DIR, { recursive: true });
@@ -1334,6 +1430,9 @@ Istruzione finale non negoziabile: rispondi in ${targetLanguage}.`;
 }
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
+  /** Rate invisibile chat libera (solo chiave server + Firestore). */
+  let invisibleTier = { maxTokens: 500, delayMs: 0, level: 1 };
+  let chatRateCalendar = { timeZone: 'UTC', localDate: dateISO() };
   try {
     const {
       idToken,
@@ -1348,6 +1447,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       nowStr,
       dateISO: dateISOInput,
       initialMessage,
+      timeZone,
+      localDate,
     } = req.body;
 
     const hasClientOpenAI = typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-');
@@ -1541,10 +1642,24 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       }
     }
 
+    if (uid && openaiKey === OPENAI_API_KEY && firebaseInitialized) {
+      chatRateCalendar = resolveChatCalendarContext({
+        timeZone,
+        localDate,
+        dateISO: dateISOInput,
+      });
+      const currentCount = await readDailyUsageForTier(uid, chatRateCalendar.localDate);
+      invisibleTier = invisibleRateTierForMessageNumber(currentCount + 1);
+    }
+
+    if (invisibleTier.delayMs > 0) {
+      await new Promise((r) => setTimeout(r, invisibleTier.delayMs));
+    }
+
     let payload = {
       model: chatModel,
       messages,
-      max_tokens: 500,
+      max_tokens: invisibleTier.maxTokens,
     };
 
     let lastContent = null;
@@ -1614,7 +1729,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         model: payload.model,
         messages,
         tool_choice: 'none',
-        max_tokens: 500,
+        max_tokens: invisibleTier.maxTokens,
       };
       const fallbackRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1646,6 +1761,9 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         const balance = await readTokenBalance(uid);
         const toDeduct = Math.min(totalTokens, balance);
         if (toDeduct > 0) await deductTokenBalance(uid, toDeduct);
+      }
+      if (openaiKey === OPENAI_API_KEY && firebaseInitialized) {
+        await incrementDailyUsageFirestore(uid, chatRateCalendar.timeZone, chatRateCalendar.localDate);
       }
     }
 
