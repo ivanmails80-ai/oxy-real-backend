@@ -107,88 +107,6 @@ const OPENAI_MODEL_OXY_PASS = (process.env.OPENAI_MODEL_OXY_PASS || process.env.
 const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || OPENAI_MODEL_STARTER).trim() || OPENAI_MODEL_STARTER;
 const MASTER_EMAIL = process.env.MASTER_EMAIL?.trim()?.toLowerCase();
 const PORT = process.env.PORT || 3030;
-/**
- * Se `true`, consente ancora chat con sole chiavi OpenAI/Gemini in body (legacy app nativa / test).
- * In produzione con Firebase lasciare **disattivato**: la chat passa solo da account + piano OXY / token / master.
- */
-const CHAT_ALLOW_CLIENT_KEYS = String(process.env.CHAT_ALLOW_CLIENT_KEYS || '').trim() === 'true';
-
-/** Chiave Gemini valida (es. inizia con AIza, lunga): l'utente la porta, costo zero per noi. */
-function isValidGeminiKey(key) {
-  return key && typeof key === 'string' && key.trim().length >= 30;
-}
-
-/**
- * Chiama Gemini (Google AI) con messaggi in formato OpenAI-like.
- * Restituisce { text } o lancia in caso di errore.
- * Nessun tool (web search / memory): solo conversazione. Gemini è gratuito per l'utente.
- */
-async function callGeminiChat(messages, geminiApiKey, imageBase64 = null) {
-  const key = geminiApiKey.trim();
-  const model = 'gemini-2.0-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-
-  let systemInstruction = '';
-  const contents = [];
-
-  const lastUserIdx = messages.map((m, i) => m.role === 'user' ? i : -1).filter(i => i >= 0).pop();
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    const role = m.role;
-    const content = m.content;
-    if (role === 'system') {
-      systemInstruction = (typeof content === 'string' ? content : (Array.isArray(content) ? content.map(p => p.type === 'text' ? p.text : '').join('\n') : '')).trim();
-      continue;
-    }
-    const text = typeof content === 'string' ? content : (Array.isArray(content) ? content.filter(p => p.type === 'text').map(p => p.text).join('\n') : '');
-    const isLastUser = role === 'user' && i === lastUserIdx;
-    if (!text && !(imageBase64 && isLastUser) && role !== 'user') continue;
-    const parts = [];
-    if (text) parts.push({ text });
-    if (imageBase64 && isLastUser) {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: imageBase64.replace(/^data:image\/\w+;base64,/, ''),
-        },
-      });
-    }
-    if (parts.length === 0 && role !== 'user') continue;
-    if (parts.length === 0 && role === 'user') parts.push({ text: '(immagine)' });
-    const geminiRole = role === 'assistant' ? 'model' : 'user';
-    contents.push({ role: geminiRole, parts });
-  }
-
-  const body = {
-    contents,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
-  };
-  if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction }] };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    if (res.status === 429) throw new Error('RATE_LIMIT_GEMINI');
-    throw new Error(errText || `Gemini ${res.status}`);
-  }
-
-  const data = await res.json();
-  const candidate = data?.candidates?.[0];
-  if (!candidate?.content?.parts?.length) {
-    const blockReason = candidate?.finishReason || data?.promptFeedback?.blockReason;
-    if (blockReason) throw new Error('Risposta non disponibile (contenuto filtrato).');
-    throw new Error('Risposta Gemini vuota.');
-  }
-  const textPart = candidate.content.parts.find(p => p.text);
-  const text = textPart?.text?.trim() || '';
-  if (!text) throw new Error('Risposta Gemini vuota.');
-  return { text };
-}
 
 // SMTP (invio email automatico documenti) — opzionale
 const SMTP_HOST = process.env.SMTP_HOST?.trim();
@@ -1436,8 +1354,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
     const {
       idToken,
-      apiKey: clientApiKey,
-      geminiApiKey: clientGeminiKey,
       history,
       message,
       imageBase64,
@@ -1451,73 +1367,52 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       localDate,
     } = req.body;
 
-    const hasClientOpenAI = typeof clientApiKey === 'string' && clientApiKey.trim().startsWith('sk-');
-    const useGeminiRaw = isValidGeminiKey(clientGeminiKey);
-    const allowLegacyClientKeys = !firebaseInitialized || CHAT_ALLOW_CLIENT_KEYS;
-    const useGemini = allowLegacyClientKeys && useGeminiRaw;
-
-    if (!allowLegacyClientKeys) {
-      if (!idToken) {
-        return res.status(401).json({ error: 'Effettua il login per usare la chat.' });
-      }
-    } else if (!idToken && !hasClientOpenAI && !useGeminiRaw) {
-      return res.status(400).json({
-        error: 'In sviluppo senza Firebase servono idToken oppure una chiave OpenAI (sk-…) o Gemini.',
-      });
+    if (!idToken) {
+      return res.status(401).json({ error: 'Effettua il login per usare la chat.' });
+    }
+    if (!firebaseInitialized) {
+      return res.status(503).json({ error: 'Chat non disponibile: configurazione server incompleta.' });
     }
 
-    let openaiKey = null;
-    let uid = null;
-    let billingSnapshot = null;
-    let isMasterUser = false;
-    let memoryVaultForPrompt = emptyMemoryVault();
-    let allowOnboardingUse = false;
+    const authData = await requireAuth(idToken);
+    const uid = authData?.uid || null;
+    const email = authData?.email || null;
+    if (!uid) {
+      return res.status(401).json({ error: 'Token non valido o scaduto.' });
+    }
+    if (authMustVerifyEmail(authData) && !isMaster(email)) {
+      return res.status(403).json({ error: 'Verifica la tua email prima di usare OXY in chat.' });
+    }
 
-    if (idToken && firebaseInitialized) {
-      const authData = await requireAuth(idToken);
-      uid = authData?.uid || null;
-      const email = authData?.email || null;
-      if (!uid) {
-        if (!allowLegacyClientKeys) {
-          return res.status(401).json({ error: 'Token non valido o scaduto.' });
-        }
-      } else {
-        if (authMustVerifyEmail(authData) && !isMaster(email)) {
-          return res.status(403).json({ error: 'Verifica la tua email prima di usare OXY in chat.' });
-        }
-        isMasterUser = !!(email && isMaster(email));
-        if (uid && firebaseInitialized) {
-          memoryVaultForPrompt = await readMemoryVault(uid);
-          allowOnboardingUse = userHasActiveMemoryOnboardingQuestionnaire(memoryVaultForPrompt);
-        }
-        if (isMasterUser && OPENAI_API_KEY) {
-          openaiKey = OPENAI_API_KEY;
-        } else if (OPENAI_API_KEY) {
-          const billing = await readBilling(uid);
-          billingSnapshot = billing;
-          const status = billing?.status || 'none';
-          const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
-          const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
-          const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing);
-          const lifetimeOk = mode === 'payment' && status === 'paid';
-          const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk || allowOnboardingUse;
-          if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
-        }
-      }
+    const isMasterUser = !!(email && isMaster(email));
+    let memoryVaultForPrompt = await readMemoryVault(uid);
+    const allowOnboardingUse = userHasActiveMemoryOnboardingQuestionnaire(memoryVaultForPrompt);
+
+    let openaiKey = null;
+    let billingSnapshot = null;
+    if (isMasterUser && OPENAI_API_KEY) {
+      openaiKey = OPENAI_API_KEY;
+    } else if (OPENAI_API_KEY) {
+      const billing = await readBilling(uid);
+      billingSnapshot = billing;
+      const status = billing?.status || 'none';
+      const mode = billing?.mode || (billing?.planId && String(billing.planId).startsWith('sub_') ? 'subscription' : 'payment');
+      const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
+      const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing);
+      const lifetimeOk = mode === 'payment' && status === 'paid';
+      const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk || allowOnboardingUse;
+      if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
     }
 
     let useTokenPack = false;
-    if (!openaiKey && uid && OPENAI_API_KEY) {
+    if (!openaiKey && OPENAI_API_KEY) {
       const balance = await readTokenBalance(uid);
       if (balance > 0) {
         openaiKey = OPENAI_API_KEY;
         useTokenPack = true;
       }
     }
-    if (!openaiKey && allowLegacyClientKeys && hasClientOpenAI) {
-      openaiKey = clientApiKey.trim();
-    }
-    if (!openaiKey && !useGemini) {
+    if (!openaiKey) {
       return res.status(403).json({
         error: 'Nessun piano attivo o credito insufficiente. Apri Abbonamento per attivare OXY Pass o Lifetime.',
       });
@@ -1626,20 +1521,6 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       });
     } else {
       messages.push({ role: 'user', content: message || '' });
-    }
-
-    // Percorso Gemini (chiave utente, costo zero per noi): solo conversazione, niente tool.
-    if (useGemini) {
-      try {
-        const result = await callGeminiChat(messages, clientGeminiKey.trim(), imageBase64 || undefined);
-        return res.json({ answer: result.text, initialMessage: isInitialMessage });
-      } catch (e) {
-        if (e.message === 'RATE_LIMIT_GEMINI') {
-          return res.status(429).json({ error: 'Limite richieste Gemini raggiunto. Riprova tra qualche minuto.' });
-        }
-        console.error('[Backend] Gemini error:', e?.message || e);
-        return res.status(500).json({ error: e?.message || 'Errore temporaneo Gemini. Riprova.' });
-      }
     }
 
     if (uid && openaiKey === OPENAI_API_KEY && firebaseInitialized) {
