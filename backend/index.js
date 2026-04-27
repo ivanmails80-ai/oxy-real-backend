@@ -107,6 +107,7 @@ const OPENAI_MODEL_STARTER = (process.env.OPENAI_MODEL_STARTER || 'gpt-4o-mini')
 const OPENAI_MODEL_OXY_PASS = (process.env.OPENAI_MODEL_OXY_PASS || process.env.OPENAI_MODEL_ELITE || 'gpt-4o').trim() || 'gpt-4o';
 const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || OPENAI_MODEL_STARTER).trim() || OPENAI_MODEL_STARTER;
 const MASTER_EMAIL = process.env.MASTER_EMAIL?.trim()?.toLowerCase();
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY?.trim();
 const PORT = process.env.PORT || 3030;
 
 // SMTP (invio email automatico documenti) — opzionale
@@ -1742,6 +1743,38 @@ app.get('/health', (req, res) => res.json({
   time: new Date().toISOString(),
   dataRoot: DATA_ROOT,
 }));
+
+app.post('/api/security/turnstile/verify', generalLimiter, async (req, res) => {
+  try {
+    if (!TURNSTILE_SECRET_KEY) {
+      return res.status(503).json({ success: false, error: 'Turnstile non configurato lato server.' });
+    }
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const action = typeof req.body?.action === 'string' ? req.body.action.trim().toLowerCase() : 'register';
+    if (!token) return res.status(400).json({ success: false, error: 'Token Turnstile mancante.' });
+    if (!['register'].includes(action)) return res.status(400).json({ success: false, error: 'Azione non valida.' });
+
+    const ip = req.headers['cf-connecting-ip'] || req.ip || '';
+    const form = new URLSearchParams();
+    form.set('secret', TURNSTILE_SECRET_KEY);
+    form.set('response', token);
+    if (typeof ip === 'string' && ip) form.set('remoteip', ip);
+
+    const check = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await check.json().catch(() => ({}));
+    if (!check.ok || data?.success !== true) {
+      return res.status(400).json({ success: false, error: 'Verifica anti-bot fallita.' });
+    }
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[Backend] POST /api/security/turnstile/verify error:', e);
+    return res.status(500).json({ success: false, error: 'Errore verifica anti-bot.' });
+  }
+});
 
 // ——— Landing oxyreal.it: iscrizione newsletter (Brevo) ———
 // Rotte usate dall'app (devono corrispondere a chatService e aiService):
