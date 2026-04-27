@@ -548,11 +548,18 @@ async function readMemoryVault(uid) {
     const vault = data?.memoryVault || {};
     // Fallback legacy: vecchio campo users/{uid}.memory
     const legacyMemory = data?.memory || {};
+    const legacyNotes = sanitizeUserNotes(
+      Array.isArray(data?.userNotes)
+        ? data.userNotes
+        : Array.isArray(data?.notes)
+          ? data.notes
+          : []
+    );
     return {
       profile: typeof vault?.profile === 'string' ? vault.profile : (typeof legacyMemory?.profile === 'string' ? legacyMemory.profile : ''),
       patterns: typeof vault?.patterns === 'string' ? vault.patterns : (typeof legacyMemory?.patterns === 'string' ? legacyMemory.patterns : ''),
       recent: typeof vault?.recent === 'string' ? vault.recent : (typeof legacyMemory?.recent === 'string' ? legacyMemory.recent : ''),
-      userNotes: sanitizeUserNotes(vault?.userNotes),
+      userNotes: sanitizeUserNotes(vault?.userNotes).length ? sanitizeUserNotes(vault?.userNotes) : legacyNotes,
       lastUpdated: vault?.lastUpdated || null,
       sessionCount: Number.isFinite(Number(vault?.sessionCount)) ? Math.max(0, Number(vault.sessionCount)) : 0,
       onboardingComplete: vault?.onboardingComplete === true,
@@ -600,7 +607,15 @@ async function writeMemoryVault(uid, updates = {}) {
       : current.onboardingRawAnswers,
     lastUpdated: new Date().toISOString(),
   };
-  await admin.firestore().collection('users').doc(uid).set({ memoryVault: next }, { merge: true });
+  await admin.firestore().collection('users').doc(uid).set(
+    {
+      memoryVault: next,
+      // Mirror for legacy/fallback readers
+      userNotes: next.userNotes,
+      notes: next.userNotes,
+    },
+    { merge: true }
+  );
 }
 
 async function addMemoryVaultUserNote(uid, text) {
@@ -2110,6 +2125,7 @@ app.post('/api/memory/note', generalLimiter, async (req, res) => {
     res.json({ success: true, noteId });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Errore durante il salvataggio nota';
+    console.error('[Backend] POST /api/memory/note error:', e);
     res.status(400).json({ error: msg });
   }
 });
