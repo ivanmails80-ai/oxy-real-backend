@@ -1248,9 +1248,23 @@ function computePaidChatAccess(billing) {
   return { hasPlan, status, mode, isOwnerUnlimited, isSubscription, isLifetimePaid };
 }
 
+async function readUserRole(uid) {
+  if (!uid || !firebaseInitialized) return null;
+  try {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    if (!doc.exists) return null;
+    const role = doc.data()?.role;
+    return typeof role === 'string' ? role.trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cronologia/salvataggio messaggi: stessi diritti della chat server-side (piano OXY o credito token). */
-async function canUseChatPersistence(uid, billingSnapshot = null) {
+async function canUseChatPersistence(uid, billingSnapshot = null, userRole = null) {
   if (!uid) return false;
+  const role = typeof userRole === 'string' ? userRole.trim().toLowerCase() : await readUserRole(uid);
+  if (role === 'admin') return true;
   const vault = await readMemoryVault(uid);
   if (userHasActiveMemoryOnboardingQuestionnaire(vault)) return true;
   const billing = billingSnapshot != null ? billingSnapshot : await readBilling(uid);
@@ -1397,6 +1411,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     const isMasterUser = !!(email && isMaster(email));
+    const userRole = await readUserRole(uid);
+    const isAdminUser = userRole === 'admin';
     let memoryVaultForPrompt = await readMemoryVault(uid);
     const allowOnboardingUse = userHasActiveMemoryOnboardingQuestionnaire(memoryVaultForPrompt);
 
@@ -1412,7 +1428,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const isOwnerUnlimited = status === 'owner_unlimited' || billing?.planId === OWNER_UNLIMITED_PLAN_ID || mode === 'owner';
       const subscriptionOk = mode === 'subscription' && computeSubscriptionActive(billing);
       const lifetimeOk = mode === 'payment' && status === 'paid';
-      const allowServerOpenAi = isOwnerUnlimited || subscriptionOk || lifetimeOk || allowOnboardingUse;
+      const allowServerOpenAi = isAdminUser || isOwnerUnlimited || subscriptionOk || lifetimeOk || allowOnboardingUse;
       if (allowServerOpenAi) openaiKey = OPENAI_API_KEY;
     }
 
@@ -1442,13 +1458,13 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     if (uid && openaiKey === OPENAI_API_KEY && !isMasterUser) {
       const billing = billingSnapshot || (await readBilling(uid));
       const paid = computePaidChatAccess(billing);
-      if (!paid.hasPlan && !useTokenPack && !allowOnboardingUse) {
+      if (!isAdminUser && !paid.hasPlan && !useTokenPack && !allowOnboardingUse) {
         return res.status(403).json({ error: 'Nessun piano attivo. Attiva un abbonamento o un piano Lifetime per continuare.' });
       }
       const day = dateISO();
       const used = await readChatUsage(uid, day);
       let limit = null;
-      if (!paid.isOwnerUnlimited && paid.isSubscription) {
+      if (!isAdminUser && !paid.isOwnerUnlimited && paid.isSubscription) {
         limit = _dailyLimitOxyPass;
       }
       if (limit != null && used >= limit) {
