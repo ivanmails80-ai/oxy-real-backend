@@ -148,6 +148,12 @@ const STRIPE_FOUNDER_PRICE_MAP = {
 };
 /** Opzionale: ID coupon Stripe (es. FOUNDER_LOCK) da applicare in Checkout solo per slot founder. */
 const STRIPE_FOUNDER_COUPON_ID = process.env.STRIPE_FOUNDER_COUPON_ID?.trim();
+/** Founder live prices: decrement counter only after Stripe-confirmed checkout. */
+const FOUNDER_LIVE_PRICE_IDS = new Set([
+  'price_1TQPOQGmOoq3tAJhXHR2KKCZ',
+  'price_1TQPQZGmOoq3tAJhewlUaU1D',
+  'price_1TQPShGmOoq3tAJhmdzaxQu5',
+]);
 // Token inclusi per ogni pacchetto (per webhook)
 const TOKEN_PACK_AMOUNTS = {};
 const STRIPE_SUCCESS_URL = process.env.STRIPE_SUCCESS_URL?.trim();
@@ -2315,6 +2321,28 @@ async function findUidByStripeSubscriptionId(subscriptionId) {
   return null;
 }
 
+async function decrementFounderRemainingSpotsOnce() {
+  if (!firebaseInitialized) return false;
+  const ref = admin.firestore().collection('config').doc('founderPricing');
+  try {
+    const out = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { decremented: false };
+      const data = snap.data() || {};
+      if (data.active !== true) return { decremented: false };
+      const remaining = Number(data.remainingSpots);
+      const rem = Number.isFinite(remaining) ? remaining : 0;
+      if (rem <= 0) return { decremented: false };
+      tx.update(ref, { remainingSpots: admin.firestore.FieldValue.increment(-1) });
+      return { decremented: true };
+    });
+    return !!out?.decremented;
+  } catch (e) {
+    console.warn('[Backend] decrementFounderRemainingSpotsOnce:', e?.message || e);
+    return false;
+  }
+}
+
 /** Mappa status Stripe subscription → campo status su billing/{uid}. */
 function mapStripeSubscriptionStatusToBilling(stripeStatus) {
   const s = String(stripeStatus || '').toLowerCase();
@@ -2441,32 +2469,26 @@ async function resolveStripeSubscriptionForUser(stripe, billing = null, email = 
 }
 
 /**
- * Se c'è posto founder e price ID founder configurato, decrementa remainingSpots e restituisce quel price.
- * Altrimenti null (il chiamante usa il prezzo standard).
+ * Se c'è posto founder e price ID founder configurato, restituisce quel price.
+ * Non decrementa remainingSpots qui: il decremento avviene solo su webhook Stripe confermato.
  */
-async function reserveFounderPriceIdForPlan(planIdVal) {
+async function pickFounderPriceIdForPlan(planIdVal) {
   const founderPrice = STRIPE_FOUNDER_PRICE_MAP[planIdVal];
   if (!founderPrice || !firebaseInitialized) return null;
   if (!['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal)) return null;
 
   const ref = admin.firestore().collection('config').doc('founderPricing');
   try {
-    const out = await admin.firestore().runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      if (!snap.exists) return { price: null };
-      const data = snap.data() || {};
-      if (data.active !== true) return { price: null };
-      const remaining = Number(data.remainingSpots);
-      const rem = Number.isFinite(remaining) ? remaining : 0;
-      if (rem <= 0) return { price: null };
-      tx.update(ref, {
-        remainingSpots: admin.firestore.FieldValue.increment(-1),
-      });
-      return { price: founderPrice };
-    });
-    return out?.price || null;
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    const data = snap.data() || {};
+    if (data.active !== true) return null;
+    const remaining = Number(data.remainingSpots);
+    const rem = Number.isFinite(remaining) ? remaining : 0;
+    if (rem <= 0) return null;
+    return founderPrice;
   } catch (e) {
-    console.warn('[Backend] reserveFounderPriceIdForPlan:', e?.message || e);
+    console.warn('[Backend] pickFounderPriceIdForPlan:', e?.message || e);
     return null;
   }
 }
@@ -2510,7 +2532,7 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
 
     let usedFounder = false;
     if (['oxy_monthly', 'oxy_semiannual', 'oxy_annual'].includes(planIdVal.value)) {
-      const founderReserved = await reserveFounderPriceIdForPlan(planIdVal.value);
+      const founderReserved = await pickFounderPriceIdForPlan(planIdVal.value);
       if (founderReserved) {
         priceId = founderReserved;
         usedFounder = true;
@@ -2957,6 +2979,27 @@ async function handleStripeWebhook(req, res) {
 
     if (type === 'checkout.session.completed') {
       const session = event.data?.object || {};
+      // Decrement founder counter only after Stripe confirms checkout completion.
+      try {
+        let founderPriceId = null;
+        const lineItems = session?.line_items?.data;
+        if (Array.isArray(lineItems) && lineItems.length > 0) {
+          const p = lineItems[0]?.price;
+          founderPriceId = typeof p?.id === 'string' ? p.id : null;
+        }
+        if (!founderPriceId && session?.id && stripe) {
+          const hydrated = await stripe.checkout.sessions.retrieve(String(session.id), {
+            expand: ['line_items.data.price'],
+          });
+          const p = hydrated?.line_items?.data?.[0]?.price;
+          founderPriceId = typeof p?.id === 'string' ? p.id : null;
+        }
+        if (founderPriceId && FOUNDER_LIVE_PRICE_IDS.has(founderPriceId)) {
+          await decrementFounderRemainingSpotsOnce();
+        }
+      } catch (e) {
+        console.warn('[Backend] founder counter decrement on checkout.session.completed failed:', e?.message || e);
+      }
       const persisted = await persistCheckoutSessionBilling(session);
       if (persisted.ok && persisted.uid && persisted.planId && !persisted.pack) {
         const planId = persisted.planId;
