@@ -1433,7 +1433,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     let openaiKey = null;
     let billingSnapshot = null;
-    if (isMasterUser && OPENAI_API_KEY) {
+    // Hard bypass: admin salta sempre il controllo abbonamento Stripe.
+    if (isAdminUser && OPENAI_API_KEY) {
+      openaiKey = OPENAI_API_KEY;
+      billingSnapshot = {
+        status: 'owner_unlimited',
+        mode: 'owner',
+        planId: OWNER_UNLIMITED_PLAN_ID,
+      };
+    } else if (isMasterUser && OPENAI_API_KEY) {
       openaiKey = OPENAI_API_KEY;
     } else if (OPENAI_API_KEY) {
       const billing = await readBilling(uid);
