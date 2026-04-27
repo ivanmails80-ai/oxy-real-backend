@@ -148,12 +148,10 @@ const STRIPE_FOUNDER_PRICE_MAP = {
 };
 /** Opzionale: ID coupon Stripe (es. FOUNDER_LOCK) da applicare in Checkout solo per slot founder. */
 const STRIPE_FOUNDER_COUPON_ID = process.env.STRIPE_FOUNDER_COUPON_ID?.trim();
-/** Founder live prices: decrement counter only after Stripe-confirmed checkout. */
-const FOUNDER_LIVE_PRICE_IDS = new Set([
-  'price_1TQPOQGmOoq3tAJhXHR2KKCZ',
-  'price_1TQPQZGmOoq3tAJhewlUaU1D',
-  'price_1TQPShGmOoq3tAJhmdzaxQu5',
-]);
+/** Founder prices from env: decrement counter only after Stripe-confirmed checkout. */
+const FOUNDER_LIVE_PRICE_IDS = new Set(
+  Object.values(STRIPE_FOUNDER_PRICE_MAP).filter((v) => typeof v === 'string' && v.trim().startsWith('price_'))
+);
 // Token inclusi per ogni pacchetto (per webhook)
 const TOKEN_PACK_AMOUNTS = {};
 const STRIPE_SUCCESS_URL = process.env.STRIPE_SUCCESS_URL?.trim();
