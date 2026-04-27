@@ -2473,6 +2473,10 @@ app.post('/api/billing/checkout', billingLimiter, async (req, res) => {
       success_url: successUrl,
       cancel_url: cancelUrl,
       customer_email: email,
+      // Stripe Tax: calcolo automatico + dati fiscali cliente raccolti in checkout
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      tax_id_collection: { enabled: true },
       line_items: [
         {
           price: priceId,
