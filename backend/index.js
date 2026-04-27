@@ -1275,6 +1275,16 @@ async function readUserRole(uid) {
   }
 }
 
+async function readUserDoc(uid) {
+  if (!uid || !firebaseInitialized) return null;
+  try {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    return doc.exists ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cronologia/salvataggio messaggi: stessi diritti della chat server-side (piano OXY o credito token). */
 async function canUseChatPersistence(uid, billingSnapshot = null, userRole = null) {
   if (!uid) return false;
@@ -1426,7 +1436,12 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     const isMasterUser = !!(email && isMaster(email));
-    const userRole = await readUserRole(uid);
+    const userDoc = await readUserDoc(uid);
+    const userRole =
+      userDoc && typeof userDoc.data()?.role === 'string'
+        ? userDoc.data().role.trim().toLowerCase()
+        : await readUserRole(uid);
+    console.log('ADMIN CHECK - uid:', uid, 'role:', userDoc?.data()?.role ?? null);
     const isAdminUser = userRole === 'admin';
     let memoryVaultForPrompt = await readMemoryVault(uid);
     const allowOnboardingUse = userHasActiveMemoryOnboardingQuestionnaire(memoryVaultForPrompt);
